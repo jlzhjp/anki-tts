@@ -51,7 +51,7 @@ func TestWorkflowGeneratesStoresAndUpdates(t *testing.T) {
 	if service.input.Text != "Hello world" {
 		t.Fatalf("TTS input = %q", service.input.Text)
 	}
-	if client.mediaFilename != "_anki-tts-42-"+audioHashPrefix+".mp3" {
+	if client.mediaFilename != "anki-tts-42-"+audioHashPrefix+".mp3" {
 		t.Fatalf("media filename = %q", client.mediaFilename)
 	}
 	wantField := "existing<br>[sound:" + client.mediaFilename + "]"
@@ -95,7 +95,7 @@ func TestTransformationDeterminesUploadedMedia(t *testing.T) {
 		t.Fatal(message.err)
 	}
 	wantHash := sha256.Sum256([]byte("transformed audio"))
-	wantFilename := fmt.Sprintf("_anki-tts-42-%x.mp3", wantHash[:6])
+	wantFilename := fmt.Sprintf("anki-tts-42-%x.mp3", wantHash[:6])
 	if client.mediaFilename != wantFilename {
 		t.Fatalf("filename = %q, want %q", client.mediaFilename, wantFilename)
 	}

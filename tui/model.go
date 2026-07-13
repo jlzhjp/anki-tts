@@ -359,7 +359,7 @@ func (m Model) generateCmd(service tts.NamedService) tea.Cmd {
 			return savedMsg{service: service, err: fmt.Errorf("final audio exceeds %d bytes", maxFinalAudioSize)}
 		}
 		hash := sha256.Sum256(data)
-		filename := fmt.Sprintf("_anki-tts-%d-%x.%s", m.note.ID, hash[:6], format)
+		filename := fmt.Sprintf("anki-tts-%d-%x.%s", m.note.ID, hash[:6], format)
 		storedFilename, err := m.anki.StoreMediaFile(m.ctx, filename, data)
 		if err != nil {
 			return savedMsg{service: service, err: err}
