@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"charm.land/bubbletea/v2"
 	"github.com/BurntSushi/toml"
 
+	"jlzhjp.dev/anki-tts/anki"
 	"jlzhjp.dev/anki-tts/openrouter"
 	"jlzhjp.dev/anki-tts/tts"
+	"jlzhjp.dev/anki-tts/tui"
 )
 
 const configFileName = "config.toml"
@@ -20,42 +22,53 @@ type config struct {
 }
 
 func main() {
-	configHome, err := os.UserConfigDir()
-	if err == nil {
-		err = run(context.Background(), os.Args[1:], configHome, openrouter.NewFactory())
-	}
-	if err != nil {
+	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args []string, configHome string, factory tts.ServiceFactory) error {
-	if len(args) == 0 {
-		return errors.New("usage: anki-tts <sentence>")
+func run() error {
+	configHome, err := os.UserConfigDir()
+	if err != nil {
+		return fmt.Errorf("resolve user config directory: %w", err)
 	}
-
-	configPath := filepath.Join(configHome, "anki-tts", configFileName)
-	var cfg config
-	if _, err := toml.DecodeFile(configPath, &cfg); err != nil {
-		return fmt.Errorf("load config %q: %w", configPath, err)
-	}
-	if cfg.OpenRouter == nil {
-		return fmt.Errorf("load config %q: [openrouter] table is required", configPath)
-	}
-
-	service, err := factory.Create(cfg.OpenRouter)
+	cfg, err := loadConfig(filepath.Join(configHome, "anki-tts", configFileName))
 	if err != nil {
 		return err
 	}
-	voice, err := service.Generate(ctx, tts.Input{Text: args[0]})
+	services, err := buildServices(cfg)
 	if err != nil {
 		return err
 	}
 
-	outputPath := "result." + voice.Format
-	if err := os.WriteFile(outputPath, voice.Data, 0o644); err != nil {
-		return fmt.Errorf("write generated voice to %q: %w", outputPath, err)
+	model := tui.New(context.Background(), anki.NewClient(), services)
+	_, err = tea.NewProgram(model).Run()
+	if err != nil {
+		return fmt.Errorf("run TUI: %w", err)
 	}
 	return nil
+}
+
+func loadConfig(path string) (config, error) {
+	var cfg config
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		return config{}, fmt.Errorf("load config %q: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func buildServices(cfg config) (*tts.Container, error) {
+	container := tts.NewContainer()
+	if cfg.OpenRouter == nil {
+		return container, nil
+	}
+	service, err := openrouter.NewFactory().Create(cfg.OpenRouter)
+	if err != nil {
+		return nil, err
+	}
+	if err := container.Add("OpenRouter", service); err != nil {
+		return nil, err
+	}
+	return container, nil
 }

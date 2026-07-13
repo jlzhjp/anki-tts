@@ -109,6 +109,40 @@ func TestUpdateNotes(t *testing.T) {
 	}
 }
 
+func TestStoreMediaFile(t *testing.T) {
+	client := testClient(t, func(t *testing.T, got request) any {
+		if got.Action != "storeMediaFile" {
+			t.Fatalf("action = %q, want storeMediaFile", got.Action)
+		}
+		params := decodeParams[struct {
+			Filename string `json:"filename"`
+			Data     string `json:"data"`
+		}](t, got.Params)
+		if params.Filename != "_anki-tts.mp3" || params.Data != "YXVkaW8=" {
+			t.Fatalf("params = %+v", params)
+		}
+		return "_anki-tts.mp3"
+	})
+
+	filename, err := client.StoreMediaFile(context.Background(), "_anki-tts.mp3", []byte("audio"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filename != "_anki-tts.mp3" {
+		t.Fatalf("filename = %q", filename)
+	}
+}
+
+func TestStoreMediaFileValidation(t *testing.T) {
+	client := NewClient()
+	if _, err := client.StoreMediaFile(context.Background(), "../audio.mp3", []byte("audio")); err == nil {
+		t.Fatal("expected invalid filename error")
+	}
+	if _, err := client.StoreMediaFile(context.Background(), "audio.mp3", nil); err == nil {
+		t.Fatal("expected empty data error")
+	}
+}
+
 func TestAnkiConnectError(t *testing.T) {
 	client := NewClient(WithHTTPClient(doerFunc(func(*http.Request) (*http.Response, error) {
 		return jsonResponse(`{"result":null,"error":"collection unavailable"}`), nil

@@ -4,11 +4,13 @@ package anki
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -172,6 +174,33 @@ func (c *Client) UpdateNotes(ctx context.Context, updates []NoteUpdate) error {
 		}
 	}
 	return nil
+}
+
+// StoreMediaFile stores data in Anki's media collection and returns the
+// filename accepted by AnkiConnect.
+func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byte) (string, error) {
+	if strings.TrimSpace(filename) == "" {
+		return "", errors.New("store media file: filename is required")
+	}
+	if filepath.Base(filename) != filename || strings.ContainsAny(filename, `/\`) {
+		return "", errors.New("store media file: filename must not contain path separators")
+	}
+	if len(data) == 0 {
+		return "", errors.New("store media file: data is required")
+	}
+
+	params := struct {
+		Filename string `json:"filename"`
+		Data     string `json:"data"`
+	}{Filename: filename, Data: base64.StdEncoding.EncodeToString(data)}
+	var storedFilename string
+	if err := c.invoke(ctx, "storeMediaFile", params, &storedFilename); err != nil {
+		return "", fmt.Errorf("store media file %q: %w", filename, err)
+	}
+	if storedFilename == "" {
+		storedFilename = filename
+	}
+	return storedFilename, nil
 }
 
 func (c *Client) invoke(ctx context.Context, action string, params, result any) error {
