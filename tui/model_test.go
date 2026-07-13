@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -118,6 +120,22 @@ func TestTransformationFailurePreventsAnkiChanges(t *testing.T) {
 	}
 }
 
+func TestTransformationStreamFailurePreventsAnkiChanges(t *testing.T) {
+	client := &fakeAnki{}
+	service := &fakeTTS{data: "provider audio", format: "wav"}
+	streamErr := errors.New("FFmpeg execution failed")
+	transformer := &fakeTransformer{streamErr: streamErr, format: "mp3"}
+	m, namedService := readyToGenerateModel(t, client, service, transformer)
+
+	message := m.generateCmd(namedService)().(savedMsg)
+	if !errors.Is(message.err, streamErr) {
+		t.Fatalf("error = %v", message.err)
+	}
+	if client.storeCalls != 0 || client.updateCalls != 0 {
+		t.Fatalf("Anki calls: store=%d update=%d", client.storeCalls, client.updateCalls)
+	}
+}
+
 func TestRetryRepeatsTransformation(t *testing.T) {
 	client := &fakeAnki{}
 	service := &fakeTTS{data: "provider audio", format: "wav"}
@@ -221,23 +239,38 @@ func (f *fakeTTS) Generate(_ context.Context, input tts.Input) (tts.Voice, error
 }
 
 type fakeTransformer struct {
-	errs   []error
-	output string
-	format string
-	calls  int
+	errs      []error
+	output    string
+	format    string
+	calls     int
+	streamErr error
 }
 
-func (f *fakeTransformer) Transform(_ context.Context, input tts.Voice) (tts.Voice, error) {
+func (f *fakeTransformer) Transform(_ context.Context, input tts.AudioStream) (tts.AudioStream, error) {
+	_, _ = io.ReadAll(input.Data)
+	_ = input.Data.Close()
 	call := f.calls
 	f.calls++
 	if call < len(f.errs) && f.errs[call] != nil {
-		return tts.Voice{}, f.errs[call]
+		return tts.AudioStream{}, f.errs[call]
 	}
-	input.Data = []byte(f.output)
+	if f.streamErr != nil {
+		input.Data = io.NopCloser(errorReader{err: f.streamErr})
+	} else {
+		input.Data = io.NopCloser(bytes.NewBufferString(f.output))
+	}
 	input.Format = f.format
 	return input, nil
 }
 
+type errorReader struct {
+	err error
+}
+
+func (r errorReader) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
 func voice(data, format string) tts.Voice {
-	return tts.Voice{Data: []byte(data), Format: format}
+	return tts.Voice{Audio: tts.AudioStream{Data: io.NopCloser(bytes.NewBufferString(data)), Format: format}}
 }

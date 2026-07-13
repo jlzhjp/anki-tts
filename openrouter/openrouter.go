@@ -158,17 +158,12 @@ func (s *service) Generate(ctx context.Context, input tts.Input) (tts.Voice, err
 	if err != nil {
 		return tts.Voice{}, fmt.Errorf("generate OpenRouter speech: send request: %w", err)
 	}
-	defer resp.Body.Close()
-
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		defer resp.Body.Close()
 		return tts.Voice{}, openRouterError(resp, s.apiKey)
 	}
-
-	audio, err := io.ReadAll(io.LimitReader(resp.Body, maxAudioSize+1))
-	if err != nil {
-		return tts.Voice{}, fmt.Errorf("generate OpenRouter speech: read response: %w", err)
-	}
-	if len(audio) > maxAudioSize {
+	if resp.ContentLength > maxAudioSize {
+		_ = resp.Body.Close()
 		return tts.Voice{}, fmt.Errorf("generate OpenRouter speech: response exceeds %d bytes", maxAudioSize)
 	}
 
@@ -177,11 +172,35 @@ func (s *service) Generate(ctx context.Context, input tts.Input) (tts.Voice, err
 		mediaType = mediaTypeForFormat(s.format)
 	}
 	return tts.Voice{
-		Data:         audio,
-		MediaType:    mediaType,
-		Format:       s.format,
+		Audio: tts.AudioStream{
+			Data:      &limitedAudioStream{body: resp.Body, remaining: maxAudioSize},
+			MediaType: mediaType,
+			Format:    s.format,
+		},
 		GenerationID: resp.Header.Get("X-Generation-Id"),
 	}, nil
+}
+
+type limitedAudioStream struct {
+	body      io.ReadCloser
+	remaining int64
+}
+
+func (s *limitedAudioStream) Read(p []byte) (int, error) {
+	buffer := p
+	if int64(len(buffer)) > s.remaining+1 {
+		buffer = buffer[:s.remaining+1]
+	}
+	n, err := s.body.Read(buffer)
+	if int64(n) > s.remaining {
+		return 0, fmt.Errorf("generate OpenRouter speech: response exceeds %d bytes", maxAudioSize)
+	}
+	s.remaining -= int64(n)
+	return n, err
+}
+
+func (s *limitedAudioStream) Close() error {
+	return s.body.Close()
 }
 
 func openRouterError(resp *http.Response, apiKey string) error {

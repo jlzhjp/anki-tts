@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"unicode"
@@ -37,6 +38,8 @@ const (
 	serviceScreen
 	errorScreen
 )
+
+const maxFinalAudioSize = 32 << 20 // 32 MiB
 
 type destinationAction string
 
@@ -325,22 +328,39 @@ func (m Model) generateCmd(service tts.NamedService) tea.Cmd {
 		if err != nil {
 			return savedMsg{service: service, err: err}
 		}
-		if len(voice.Data) == 0 {
+		audio := voice.Audio
+		if audio.Data == nil {
 			return savedMsg{service: service, err: errors.New("TTS service returned no audio data")}
 		}
 		if m.transformer != nil {
-			voice, err = m.transformer.Transform(m.ctx, voice)
+			input := audio
+			audio, err = m.transformer.Transform(m.ctx, input)
 			if err != nil {
+				_ = input.Data.Close()
 				return savedMsg{service: service, err: err}
 			}
 		}
-		format := safeFormat(voice.Format)
-		if format == "" {
-			return savedMsg{service: service, err: fmt.Errorf("TTS service returned invalid audio format %q", voice.Format)}
+		if audio.Data == nil {
+			return savedMsg{service: service, err: errors.New("audio pipeline returned no data stream")}
 		}
-		hash := sha256.Sum256(voice.Data)
+		defer audio.Data.Close()
+		format := safeFormat(audio.Format)
+		if format == "" {
+			return savedMsg{service: service, err: fmt.Errorf("audio pipeline returned invalid format %q", audio.Format)}
+		}
+		data, err := io.ReadAll(io.LimitReader(audio.Data, maxFinalAudioSize+1))
+		if err != nil {
+			return savedMsg{service: service, err: fmt.Errorf("read final audio: %w", err)}
+		}
+		if len(data) == 0 {
+			return savedMsg{service: service, err: errors.New("audio pipeline returned empty data")}
+		}
+		if len(data) > maxFinalAudioSize {
+			return savedMsg{service: service, err: fmt.Errorf("final audio exceeds %d bytes", maxFinalAudioSize)}
+		}
+		hash := sha256.Sum256(data)
 		filename := fmt.Sprintf("_anki-tts-%d-%x.%s", m.note.ID, hash[:6], format)
-		storedFilename, err := m.anki.StoreMediaFile(m.ctx, filename, voice.Data)
+		storedFilename, err := m.anki.StoreMediaFile(m.ctx, filename, data)
 		if err != nil {
 			return savedMsg{service: service, err: err}
 		}

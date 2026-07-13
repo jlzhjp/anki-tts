@@ -40,7 +40,8 @@ func TestFactoryCreateDefaultsAndEnvironmentKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(voice.Data) != "audio" || voice.Format != "mp3" || voice.MediaType != "audio/mpeg" {
+	audio := readVoiceAudio(t, voice)
+	if string(audio) != "audio" || voice.Audio.Format != "mp3" || voice.Audio.MediaType != "audio/mpeg" {
 		t.Fatalf("voice = %+v", voice)
 	}
 }
@@ -67,7 +68,8 @@ func TestFactoryMapKeyTakesPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if voice.Format != "pcm" || voice.MediaType != "audio/pcm" {
+	_ = readVoiceAudio(t, voice)
+	if voice.Audio.Format != "pcm" || voice.Audio.MediaType != "audio/pcm" {
 		t.Fatalf("voice = %+v", voice)
 	}
 }
@@ -123,8 +125,40 @@ func TestGenerateRequestAndMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(voice.Data, []byte{1, 2, 3}) || voice.GenerationID != "generation-123" {
+	audio := readVoiceAudio(t, voice)
+	if !bytes.Equal(audio, []byte{1, 2, 3}) || voice.GenerationID != "generation-123" {
 		t.Fatalf("voice = %+v", voice)
+	}
+}
+
+func TestGenerateLeavesSuccessfulResponseStreaming(t *testing.T) {
+	body := &countingReadCloser{Reader: strings.NewReader("streamed audio")}
+	service := mustService(t, doerFunc(func(*http.Request) (*http.Response, error) {
+		resp := response(http.StatusOK, "audio/mpeg", nil)
+		resp.Body = body
+		resp.ContentLength = -1
+		return resp, nil
+	}))
+	voice, err := service.Generate(context.Background(), tts.Input{Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body.reads != 0 {
+		t.Fatalf("response was read during Generate: %d reads", body.reads)
+	}
+	if got := string(readVoiceAudio(t, voice)); got != "streamed audio" {
+		t.Fatalf("audio = %q", got)
+	}
+}
+
+func TestGeneratedAudioStreamEnforcesSizeLimit(t *testing.T) {
+	stream := &limitedAudioStream{
+		body:      io.NopCloser(strings.NewReader("12345")),
+		remaining: 4,
+	}
+	_, err := io.ReadAll(stream)
+	if err == nil || !strings.Contains(err.Error(), "response exceeds") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -206,4 +240,32 @@ func response(status int, mediaType string, body []byte) *http.Response {
 		Header:     header,
 		Body:       io.NopCloser(bytes.NewReader(body)),
 	}
+}
+
+func readVoiceAudio(t *testing.T, voice tts.Voice) []byte {
+	t.Helper()
+	data, err := io.ReadAll(voice.Audio.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := voice.Audio.Data.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+type countingReadCloser struct {
+	io.Reader
+	reads  int
+	closed bool
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	r.reads++
+	return r.Reader.Read(p)
+}
+
+func (r *countingReadCloser) Close() error {
+	r.closed = true
+	return nil
 }

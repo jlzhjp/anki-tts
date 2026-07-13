@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -22,8 +23,9 @@ type Service interface {
 }
 
 // Transformer applies a provider-neutral transformation to generated audio.
+// On success, the returned stream owns and eventually closes the input stream.
 type Transformer interface {
-	Transform(ctx context.Context, voice Voice) (Voice, error)
+	Transform(ctx context.Context, audio AudioStream) (AudioStream, error)
 }
 
 // Input describes text to synthesize.
@@ -31,11 +33,17 @@ type Input struct {
 	Text string
 }
 
+// AudioStream contains audio data and its media description. The consumer owns
+// Data and must close it.
+type AudioStream struct {
+	Data      io.ReadCloser
+	MediaType string
+	Format    string
+}
+
 // Voice contains generated audio and provider response metadata.
 type Voice struct {
-	Data         []byte
-	MediaType    string
-	Format       string
+	Audio        AudioStream
 	GenerationID string
 }
 
