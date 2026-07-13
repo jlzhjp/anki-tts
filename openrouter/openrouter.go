@@ -8,23 +8,28 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"jlzhjp.dev/anki-tts/tts"
 )
 
 const (
-	defaultEndpoint           = "https://openrouter.ai/api/v1/audio/speech"
-	defaultGenerationEndpoint = "https://openrouter.ai/api/v1/generation"
-	defaultVoice              = "alloy"
-	defaultFormat             = "mp3"
-	maxAudioSize              = 32 << 20 // 32 MiB
-	maxErrorBodySize          = 64 << 10 // 64 KiB
-	apiKeyEnvironment         = "OPENROUTER_API_KEY"
+	defaultEndpoint       = "https://openrouter.ai/api/v1/audio/speech"
+	defaultModelsEndpoint = "https://openrouter.ai/api/v1/models"
+	defaultVoice          = "alloy"
+	defaultFormat         = "mp3"
+	maxAudioSize          = 32 << 20 // 32 MiB
+	maxErrorBodySize      = 64 << 10 // 64 KiB
+	maxModelsResponseSize = 4 << 20  // 4 MiB
+	apiKeyEnvironment     = "OPENROUTER_API_KEY"
 )
 
 // HTTPClient is implemented by *http.Client.
@@ -34,9 +39,9 @@ type HTTPClient interface {
 
 // Factory creates OpenRouter text-to-speech services.
 type Factory struct {
-	endpoint           string
-	generationEndpoint string
-	httpClient         HTTPClient
+	endpoint       string
+	modelsEndpoint string
+	httpClient     HTTPClient
 }
 
 // Option configures a Factory.
@@ -49,10 +54,10 @@ func WithEndpoint(endpoint string) Option {
 	}
 }
 
-// WithGenerationEndpoint overrides the generation metadata endpoint.
-func WithGenerationEndpoint(endpoint string) Option {
+// WithModelsEndpoint overrides the model metadata endpoint.
+func WithModelsEndpoint(endpoint string) Option {
 	return func(factory *Factory) {
-		factory.generationEndpoint = strings.TrimSpace(endpoint)
+		factory.modelsEndpoint = strings.TrimSpace(endpoint)
 	}
 }
 
@@ -68,8 +73,8 @@ func WithHTTPClient(client HTTPClient) Option {
 // NewFactory creates an OpenRouter service factory.
 func NewFactory(options ...Option) *Factory {
 	factory := &Factory{
-		endpoint:           defaultEndpoint,
-		generationEndpoint: defaultGenerationEndpoint,
+		endpoint:       defaultEndpoint,
+		modelsEndpoint: defaultModelsEndpoint,
 		httpClient: &http.Client{
 			Timeout: 2 * time.Minute,
 		},
@@ -115,29 +120,31 @@ func (f *Factory) Create(config map[string]any) (tts.Service, error) {
 	if strings.TrimSpace(f.endpoint) == "" {
 		return nil, errors.New("create OpenRouter TTS service: endpoint is required")
 	}
-	if strings.TrimSpace(f.generationEndpoint) == "" {
-		return nil, errors.New("create OpenRouter TTS service: generation endpoint is required")
+	if strings.TrimSpace(f.modelsEndpoint) == "" {
+		return nil, errors.New("create OpenRouter TTS service: models endpoint is required")
 	}
 
 	return &service{
-		endpoint:           f.endpoint,
-		generationEndpoint: f.generationEndpoint,
-		apiKey:             apiKey,
-		model:              model,
-		voice:              voice,
-		format:             format,
-		httpClient:         f.httpClient,
+		endpoint:       f.endpoint,
+		modelsEndpoint: f.modelsEndpoint,
+		apiKey:         apiKey,
+		model:          model,
+		voice:          voice,
+		format:         format,
+		httpClient:     f.httpClient,
 	}, nil
 }
 
 type service struct {
-	endpoint           string
-	generationEndpoint string
-	apiKey             string
-	model              string
-	voice              string
-	format             string
-	httpClient         HTTPClient
+	endpoint       string
+	modelsEndpoint string
+	apiKey         string
+	model          string
+	voice          string
+	format         string
+	httpClient     HTTPClient
+	pricingMu      sync.Mutex
+	pricePerChar   *float64
 }
 
 type speechRequest struct {
@@ -188,20 +195,20 @@ func (s *service) Generate(ctx context.Context, input tts.Input) (tts.Voice, err
 		mediaType = mediaTypeForFormat(s.format)
 	}
 	return &voiceResult{
-		stream:       &limitedAudioStream{body: resp.Body, remaining: maxAudioSize},
-		mediaType:    mediaType,
-		format:       s.format,
-		generationID: resp.Header.Get("X-Generation-Id"),
-		service:      s,
+		stream:         &limitedAudioStream{body: resp.Body, remaining: maxAudioSize},
+		mediaType:      mediaType,
+		format:         s.format,
+		characterCount: utf8.RuneCountInString(input.Text),
+		service:        s,
 	}, nil
 }
 
 type voiceResult struct {
-	stream       io.ReadCloser
-	mediaType    string
-	format       string
-	generationID string
-	service      *service
+	stream         io.ReadCloser
+	mediaType      string
+	format         string
+	characterCount int
+	service        *service
 }
 
 func (v *voiceResult) Read(p []byte) (int, error) { return v.stream.Read(p) }
@@ -210,45 +217,70 @@ func (v *voiceResult) Format() string             { return v.format }
 func (v *voiceResult) MediaType() string          { return v.mediaType }
 
 func (v *voiceResult) LoadCost(ctx context.Context) (float64, error) {
-	if v.generationID == "" {
-		return 0, errors.New("lookup OpenRouter generation cost: response did not include X-Generation-Id")
+	price, err := v.service.loadPricePerCharacter(ctx)
+	if err != nil {
+		return 0, err
 	}
-	return v.service.lookupCost(ctx, v.generationID)
+	return float64(v.characterCount) * price, nil
 }
 
-func (s *service) lookupCost(ctx context.Context, generationID string) (float64, error) {
-	endpoint, err := url.Parse(s.generationEndpoint)
+func (s *service) loadPricePerCharacter(ctx context.Context) (float64, error) {
+	s.pricingMu.Lock()
+	defer s.pricingMu.Unlock()
+	if s.pricePerChar != nil {
+		return *s.pricePerChar, nil
+	}
+
+	endpoint, err := url.Parse(s.modelsEndpoint)
 	if err != nil {
-		return 0, fmt.Errorf("lookup OpenRouter generation cost: parse endpoint: %w", err)
+		return 0, fmt.Errorf("load OpenRouter TTS pricing: parse endpoint: %w", err)
 	}
 	query := endpoint.Query()
-	query.Set("id", generationID)
+	query.Set("output_modalities", "speech")
 	endpoint.RawQuery = query.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
-		return 0, fmt.Errorf("lookup OpenRouter generation cost: create request: %w", err)
+		return 0, fmt.Errorf("load OpenRouter TTS pricing: create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("lookup OpenRouter generation cost: send request: %w", err)
+		return 0, fmt.Errorf("load OpenRouter TTS pricing: send request: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return 0, openRouterAPIError("lookup OpenRouter generation cost", resp, s.apiKey)
+		return 0, openRouterAPIError("load OpenRouter TTS pricing", resp, s.apiKey)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxModelsResponseSize+1))
+	if err != nil {
+		return 0, fmt.Errorf("load OpenRouter TTS pricing: read response: %w", err)
+	}
+	if len(body) > maxModelsResponseSize {
+		return 0, fmt.Errorf("load OpenRouter TTS pricing: response exceeds %d bytes", maxModelsResponseSize)
 	}
 	var result struct {
-		Data struct {
-			TotalCost *float64 `json:"total_cost"`
+		Data []struct {
+			ID      string `json:"id"`
+			Pricing struct {
+				Prompt string `json:"prompt"`
+			} `json:"pricing"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxErrorBodySize)).Decode(&result); err != nil {
-		return 0, fmt.Errorf("lookup OpenRouter generation cost: decode response: %w", err)
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, fmt.Errorf("load OpenRouter TTS pricing: decode response: %w", err)
 	}
-	if result.Data.TotalCost == nil {
-		return 0, errors.New("lookup OpenRouter generation cost: response does not contain total_cost")
+	for _, model := range result.Data {
+		if model.ID != s.model {
+			continue
+		}
+		price, err := strconv.ParseFloat(model.Pricing.Prompt, 64)
+		if err != nil || price < 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+			return 0, fmt.Errorf("load OpenRouter TTS pricing: model %q has invalid per-character price %q", s.model, model.Pricing.Prompt)
+		}
+		s.pricePerChar = &price
+		return price, nil
 	}
-	return *result.Data.TotalCost, nil
+	return 0, fmt.Errorf("load OpenRouter TTS pricing: model %q was not found in speech models", s.model)
 }
 
 type limitedAudioStream struct {

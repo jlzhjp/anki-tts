@@ -62,8 +62,9 @@ func TestWorkflowGeneratesStoresAndUpdates(t *testing.T) {
 		t.Fatalf("updated Audio = %q, want %q", got, wantField)
 	}
 	m = update(t, m, saved)
-	if !strings.Contains(m.status, "Cost: $0.001250") {
-		t.Fatalf("status = %q", m.status)
+	m = update(t, m, notesMsg{notes: []anki.Note{note}})
+	if view := m.View().Content; !strings.Contains(view, "Cost: $0.001250") {
+		t.Fatalf("view = %q", view)
 	}
 }
 

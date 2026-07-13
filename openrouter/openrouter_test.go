@@ -100,12 +100,13 @@ func TestFactoryConfigurationErrors(t *testing.T) {
 	}
 }
 
-func TestGenerateRequestAndMetadata(t *testing.T) {
+func TestGenerateRequestAndPricing(t *testing.T) {
 	const endpoint = "https://example.test/speech"
-	const generationEndpoint = "https://example.test/generation"
+	const modelsEndpoint = "https://example.test/models"
+	modelsCalls := 0
 	factory := NewFactory(
 		WithEndpoint(endpoint),
-		WithGenerationEndpoint(generationEndpoint),
+		WithModelsEndpoint(modelsEndpoint),
 		WithHTTPClient(doerFunc(func(req *http.Request) (*http.Response, error) {
 			switch req.Method {
 			case http.MethodPost:
@@ -116,16 +117,16 @@ func TestGenerateRequestAndMetadata(t *testing.T) {
 					t.Fatalf("Content-Type = %q", got)
 				}
 				resp := response(http.StatusOK, "audio/mpeg", []byte{1, 2, 3})
-				resp.Header.Set("X-Generation-Id", "generation-123")
 				return resp, nil
 			case http.MethodGet:
-				if req.URL.Path != "/generation" || req.URL.Query().Get("id") != "generation-123" {
-					t.Fatalf("cost request URL = %s", req.URL)
+				modelsCalls++
+				if req.URL.Path != "/models" || req.URL.Query().Get("output_modalities") != "speech" {
+					t.Fatalf("pricing request URL = %s", req.URL)
 				}
 				if got := req.Header.Get("Authorization"); got != "Bearer secret" {
 					t.Fatalf("Authorization = %q", got)
 				}
-				return response(http.StatusOK, "application/json", []byte(`{"data":{"total_cost":0.00125}}`)), nil
+				return response(http.StatusOK, "application/json", []byte(`{"data":[{"id":"model","pricing":{"prompt":"0.000625","completion":"0"}}]}`)), nil
 			default:
 				t.Fatalf("method = %s", req.Method)
 				return nil, nil
@@ -137,7 +138,7 @@ func TestGenerateRequestAndMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	voice, err := service.Generate(context.Background(), tts.Input{Text: "speak this"})
+	voice, err := service.Generate(context.Background(), tts.Input{Text: "猫a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,6 +152,12 @@ func TestGenerateRequestAndMetadata(t *testing.T) {
 	}
 	if cost != 0.00125 {
 		t.Fatalf("cost = %v", cost)
+	}
+	if _, err := voice.LoadCost(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if modelsCalls != 1 {
+		t.Fatalf("models API calls = %d, want 1", modelsCalls)
 	}
 }
 

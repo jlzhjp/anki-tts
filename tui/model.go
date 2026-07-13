@@ -9,6 +9,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/bubbles/v2/list"
@@ -87,6 +88,7 @@ func New(ctx context.Context, client AnkiClient, services *tts.Container, transf
 	l.SetShowStatusBar(true)
 	l.SetFilteringEnabled(true)
 	l.DisableQuitKeybindings()
+	l.StatusMessageLifetime = 10 * time.Second
 	spinnerCmd := l.StartSpinner()
 	model := Model{ctx: ctx, anki: client, services: services, transformer: transformer, list: l, initialCmd: spinnerCmd, screen: deckScreen, width: 80, height: 24, busy: true}
 	if len(services.Services()) == 0 {
@@ -129,18 +131,24 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.busy, m.err, m.screen, m.notes = false, nil, noteScreen, msg.notes
 		m.setList("Select a note — "+m.deck, noteItems(msg.notes))
+		if m.status != "" {
+			statusCmd := m.list.NewStatusMessage(m.status)
+			m.status = ""
+			return m, statusCmd
+		}
 		return m, nil
 	case savedMsg:
 		m.list.StopSpinner()
 		if msg.err != nil {
 			return m.fail(msg.err, serviceScreen, m.generateCmd(msg.service)), nil
 		}
-		m.status = fmt.Sprintf("Saved %s to %s", msg.filename, m.destinationField)
+		var costStatus string
 		if msg.cost != nil {
-			m.status += fmt.Sprintf(" · Cost: $%.6f", *msg.cost)
+			costStatus = fmt.Sprintf("Cost: $%.6f · ", *msg.cost)
 		} else if msg.costErr != nil {
-			m.status += " · Cost unavailable"
+			costStatus = fmt.Sprintf("Cost unavailable: %v · ", msg.costErr)
 		}
+		m.status = costStatus + fmt.Sprintf("Saved %s to %s", msg.filename, m.destinationField)
 		m.busy = true
 		spinnerCmd := m.list.StartSpinner()
 		return m, tea.Batch(spinnerCmd, m.loadNotesCmd())
@@ -192,11 +200,7 @@ func (m Model) View() tea.View {
 	if m.busy {
 		return tea.NewView(m.list.View())
 	}
-	content := m.list.View()
-	if m.status != "" {
-		content = m.status + "\n\n" + content
-	}
-	return tea.NewView(content)
+	return tea.NewView(m.list.View())
 }
 
 func (m Model) selectCurrent() (tea.Model, tea.Cmd) {
