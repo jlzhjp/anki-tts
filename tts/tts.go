@@ -22,10 +22,11 @@ type Service interface {
 	Generate(ctx context.Context, input Input) (Voice, error)
 }
 
-// Transformer applies a provider-neutral transformation to generated audio.
-// On success, the returned stream owns and eventually closes the input stream.
+// Transformer applies a provider-neutral transformation to generated audio
+// and consumes ownership of the input Voice. On failure it closes the input;
+// on success the returned Voice owns the input and closes it when appropriate.
 type Transformer interface {
-	Transform(ctx context.Context, audio AudioStream) (AudioStream, error)
+	Transform(ctx context.Context, voice Voice) (Voice, error)
 }
 
 // Input describes text to synthesize.
@@ -33,18 +34,13 @@ type Input struct {
 	Text string
 }
 
-// AudioStream contains audio data and its media description. The consumer owns
-// Data and must close it.
-type AudioStream struct {
-	Data      io.ReadCloser
-	MediaType string
-	Format    string
-}
-
-// Voice contains generated audio and provider response metadata.
-type Voice struct {
-	Audio        AudioStream
-	GenerationID string
+// Voice is a generated audio stream with provider metadata. Callers must close
+// it. LoadCost may perform network I/O and remains valid after Close.
+type Voice interface {
+	io.ReadCloser
+	Format() string
+	MediaType() string
+	LoadCost(ctx context.Context) (float64, error)
 }
 
 // NamedService associates a display name with a Service.

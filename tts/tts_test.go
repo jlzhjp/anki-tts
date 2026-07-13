@@ -27,4 +27,4 @@ func TestContainer(t *testing.T) {
 
 type fakeService struct{}
 
-func (fakeService) Generate(context.Context, Input) (Voice, error) { return Voice{}, nil }
+func (fakeService) Generate(context.Context, Input) (Voice, error) { return nil, nil }

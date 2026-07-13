@@ -136,6 +136,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.fail(msg.err, serviceScreen, m.generateCmd(msg.service)), nil
 		}
 		m.status = fmt.Sprintf("Saved %s to %s", msg.filename, m.destinationField)
+		if msg.cost != nil {
+			m.status += fmt.Sprintf(" · Cost: $%.6f", *msg.cost)
+		} else if msg.costErr != nil {
+			m.status += " · Cost unavailable"
+		}
 		m.busy = true
 		spinnerCmd := m.list.StartSpinner()
 		return m, tea.Batch(spinnerCmd, m.loadNotesCmd())
@@ -298,6 +303,8 @@ type notesMsg struct {
 type savedMsg struct {
 	service  tts.NamedService
 	filename string
+	cost     *float64
+	costErr  error
 	err      error
 }
 
@@ -328,27 +335,25 @@ func (m Model) generateCmd(service tts.NamedService) tea.Cmd {
 		if err != nil {
 			return savedMsg{service: service, err: err}
 		}
-		audio := voice.Audio
-		if audio.Data == nil {
-			return savedMsg{service: service, err: errors.New("TTS service returned no audio data")}
+		if voice == nil {
+			return savedMsg{service: service, err: errors.New("TTS service returned no voice")}
 		}
+		finalVoice := voice
 		if m.transformer != nil {
-			input := audio
-			audio, err = m.transformer.Transform(m.ctx, input)
+			finalVoice, err = m.transformer.Transform(m.ctx, finalVoice)
 			if err != nil {
-				_ = input.Data.Close()
 				return savedMsg{service: service, err: err}
 			}
+			if finalVoice == nil {
+				return savedMsg{service: service, err: errors.New("audio pipeline returned no voice")}
+			}
 		}
-		if audio.Data == nil {
-			return savedMsg{service: service, err: errors.New("audio pipeline returned no data stream")}
-		}
-		defer audio.Data.Close()
-		format := safeFormat(audio.Format)
+		defer finalVoice.Close()
+		format := safeFormat(finalVoice.Format())
 		if format == "" {
-			return savedMsg{service: service, err: fmt.Errorf("audio pipeline returned invalid format %q", audio.Format)}
+			return savedMsg{service: service, err: fmt.Errorf("audio pipeline returned invalid format %q", finalVoice.Format())}
 		}
-		data, err := io.ReadAll(io.LimitReader(audio.Data, maxFinalAudioSize+1))
+		data, err := io.ReadAll(io.LimitReader(finalVoice, maxFinalAudioSize+1))
 		if err != nil {
 			return savedMsg{service: service, err: fmt.Errorf("read final audio: %w", err)}
 		}
@@ -357,6 +362,11 @@ func (m Model) generateCmd(service tts.NamedService) tea.Cmd {
 		}
 		if len(data) > maxFinalAudioSize {
 			return savedMsg{service: service, err: fmt.Errorf("final audio exceeds %d bytes", maxFinalAudioSize)}
+		}
+		var cost *float64
+		costValue, costErr := finalVoice.LoadCost(m.ctx)
+		if costErr == nil {
+			cost = &costValue
 		}
 		hash := sha256.Sum256(data)
 		filename := fmt.Sprintf("anki-tts-%d-%x.%s", m.note.ID, hash[:6], format)
@@ -373,7 +383,7 @@ func (m Model) generateCmd(service tts.NamedService) tea.Cmd {
 		if err != nil {
 			err = fmt.Errorf("media %q was stored but the note update failed: %w", storedFilename, err)
 		}
-		return savedMsg{service: service, filename: storedFilename, err: err}
+		return savedMsg{service: service, filename: storedFilename, cost: cost, costErr: costErr, err: err}
 	}
 }
 

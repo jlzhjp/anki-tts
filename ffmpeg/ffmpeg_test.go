@@ -8,8 +8,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"jlzhjp.dev/anki-tts/tts"
 )
 
 func TestTransformStreamsAudio(t *testing.T) {
@@ -22,10 +20,11 @@ func TestTransformStreamsAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := &trackedReadCloser{Reader: strings.NewReader("provider audio")}
-	audio, err := transformer.Transform(context.Background(), tts.AudioStream{
-		Data:      input,
-		MediaType: "audio/wav",
-		Format:    "wav",
+	voice, err := transformer.Transform(context.Background(), &testVoice{
+		ReadCloser: input,
+		mediaType:  "audio/wav",
+		format:     "wav",
+		cost:       0.0025,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,18 +42,22 @@ func TestTransformStreamsAudio(t *testing.T) {
 	if string(runner.input) != "provider audio" {
 		t.Fatalf("stdin = %q", runner.input)
 	}
-	output, err := io.ReadAll(audio.Data)
+	output, err := io.ReadAll(voice)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != "transformed" || audio.Format != "mp3" || audio.MediaType != "audio/wav" {
-		t.Fatalf("audio = %+v output=%q", audio, output)
+	if string(output) != "transformed" || voice.Format() != "mp3" || voice.MediaType() != "audio/wav" {
+		t.Fatalf("voice = %+v output=%q", voice, output)
 	}
 	if !runner.waited {
 		t.Fatal("FFmpeg process was not awaited after its output was consumed")
 	}
 	if !input.closed {
 		t.Fatal("input stream was not closed")
+	}
+	cost, err := voice.LoadCost(context.Background())
+	if err != nil || cost != 0.0025 {
+		t.Fatalf("delegated cost = %v, error = %v", cost, err)
 	}
 }
 
@@ -88,7 +91,7 @@ func TestTransformErrors(t *testing.T) {
 			} else {
 				defer cancel()
 			}
-			audio, err := transformer.Transform(ctx, tts.AudioStream{Data: io.NopCloser(strings.NewReader("input"))})
+			voice, err := transformer.Transform(ctx, &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
 			if test.startFail {
 				if err == nil || !strings.Contains(err.Error(), test.want) || !errors.Is(err, test.wantIs) {
 					t.Fatalf("start error = %v", err)
@@ -98,7 +101,7 @@ func TestTransformErrors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = io.ReadAll(audio.Data)
+			_, err = io.ReadAll(voice)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("stream error = %v, want containing %q", err, test.want)
 			}
@@ -115,11 +118,11 @@ func TestTransformBoundsStderr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	audio, err := transformer.Transform(context.Background(), tts.AudioStream{Data: io.NopCloser(strings.NewReader("input"))})
+	voice, err := transformer.Transform(context.Background(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = io.ReadAll(audio.Data)
+	_, err = io.ReadAll(voice)
 	if err == nil || !strings.Contains(err.Error(), "[truncated]") || len(err.Error()) > maxStderrSize+100 {
 		t.Fatalf("bounded stderr error length=%d error=%v", len(err.Error()), err)
 	}
@@ -185,6 +188,19 @@ func (f *fakeRunner) Start(_ context.Context, path string, args []string, stdin 
 type trackedReadCloser struct {
 	io.Reader
 	closed bool
+}
+
+type testVoice struct {
+	io.ReadCloser
+	mediaType string
+	format    string
+	cost      float64
+}
+
+func (v *testVoice) Format() string    { return v.format }
+func (v *testVoice) MediaType() string { return v.mediaType }
+func (v *testVoice) LoadCost(context.Context) (float64, error) {
+	return v.cost, nil
 }
 
 func (r *trackedReadCloser) Close() error {

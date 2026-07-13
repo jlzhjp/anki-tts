@@ -73,34 +73,51 @@ func NewWithRunner(config Config, runner CommandRunner, maxOutputSize int64) (*T
 	}, nil
 }
 
-// Transform starts FFmpeg and returns its stdout as a bounded stream.
-func (t *Transformer) Transform(ctx context.Context, audio tts.AudioStream) (tts.AudioStream, error) {
-	if audio.Data == nil {
-		return tts.AudioStream{}, errors.New("transform audio with FFmpeg: input data is required")
+// Transform starts FFmpeg and wraps the source voice with transformed audio.
+func (t *Transformer) Transform(ctx context.Context, voice tts.Voice) (tts.Voice, error) {
+	if voice == nil {
+		return nil, errors.New("transform audio with FFmpeg: input voice is required")
 	}
 	args := []string{"-hide_banner", "-loglevel", "error", "-i", "pipe:0"}
 	args = append(args, t.args...)
 	args = append(args, "-f", t.format, "pipe:1")
 
 	stderr := &boundedBuffer{limit: maxStderrSize}
-	stdout, wait, kill, err := t.runner.Start(ctx, t.path, args, audio.Data, stderr)
+	stdout, wait, kill, err := t.runner.Start(ctx, t.path, args, voice, stderr)
 	if err != nil {
-		_ = audio.Data.Close()
-		return tts.AudioStream{}, fmt.Errorf("transform audio with FFmpeg: start command: %w", err)
+		_ = voice.Close()
+		return nil, fmt.Errorf("transform audio with FFmpeg: start command: %w", err)
 	}
-	return tts.AudioStream{
-		Data: &outputStream{
+	return &transformedVoice{
+		source: voice,
+		stream: &outputStream{
 			ctx:    ctx,
 			stdout: stdout,
-			input:  audio.Data,
+			input:  voice,
 			stderr: stderr,
 			wait:   wait,
 			kill:   kill,
 			limit:  t.maxOutputSize,
 		},
-		MediaType: audio.MediaType,
-		Format:    t.format,
+		mediaType: voice.MediaType(),
+		format:    t.format,
 	}, nil
+}
+
+type transformedVoice struct {
+	source    tts.Voice
+	stream    io.ReadCloser
+	mediaType string
+	format    string
+}
+
+func (v *transformedVoice) Read(p []byte) (int, error) { return v.stream.Read(p) }
+func (v *transformedVoice) Close() error               { return v.stream.Close() }
+func (v *transformedVoice) Format() string             { return v.format }
+func (v *transformedVoice) MediaType() string          { return v.mediaType }
+
+func (v *transformedVoice) LoadCost(ctx context.Context) (float64, error) {
+	return v.source.LoadCost(ctx)
 }
 
 type outputStream struct {

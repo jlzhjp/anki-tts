@@ -48,6 +48,9 @@ func TestWorkflowGeneratesStoresAndUpdates(t *testing.T) {
 	if !ok || saved.err != nil {
 		t.Fatalf("generate message = %#v", msg)
 	}
+	if saved.cost == nil || *saved.cost != 0.00125 {
+		t.Fatalf("saved cost = %v, error = %v", saved.cost, saved.costErr)
+	}
 	if service.input.Text != "Hello world" {
 		t.Fatalf("TTS input = %q", service.input.Text)
 	}
@@ -57,6 +60,10 @@ func TestWorkflowGeneratesStoresAndUpdates(t *testing.T) {
 	wantField := "existing<br>[sound:" + client.mediaFilename + "]"
 	if got := client.update.Fields["Audio"]; got != wantField {
 		t.Fatalf("updated Audio = %q, want %q", got, wantField)
+	}
+	m = update(t, m, saved)
+	if !strings.Contains(m.status, "Cost: $0.001250") {
+		t.Fatalf("status = %q", m.status)
 	}
 }
 
@@ -246,21 +253,21 @@ type fakeTransformer struct {
 	streamErr error
 }
 
-func (f *fakeTransformer) Transform(_ context.Context, input tts.AudioStream) (tts.AudioStream, error) {
-	_, _ = io.ReadAll(input.Data)
-	_ = input.Data.Close()
+func (f *fakeTransformer) Transform(_ context.Context, input tts.Voice) (tts.Voice, error) {
+	_, _ = io.ReadAll(input)
 	call := f.calls
 	f.calls++
 	if call < len(f.errs) && f.errs[call] != nil {
-		return tts.AudioStream{}, f.errs[call]
+		_ = input.Close()
+		return nil, f.errs[call]
 	}
+	var output io.ReadCloser
 	if f.streamErr != nil {
-		input.Data = io.NopCloser(errorReader{err: f.streamErr})
+		output = io.NopCloser(errorReader{err: f.streamErr})
 	} else {
-		input.Data = io.NopCloser(bytes.NewBufferString(f.output))
+		output = io.NopCloser(bytes.NewBufferString(f.output))
 	}
-	input.Format = f.format
-	return input, nil
+	return &fakeVoice{ReadCloser: output, format: f.format, mediaType: input.MediaType(), source: input}, nil
 }
 
 type errorReader struct {
@@ -272,5 +279,30 @@ func (r errorReader) Read([]byte) (int, error) {
 }
 
 func voice(data, format string) tts.Voice {
-	return tts.Voice{Audio: tts.AudioStream{Data: io.NopCloser(bytes.NewBufferString(data)), Format: format}}
+	return &fakeVoice{ReadCloser: io.NopCloser(bytes.NewBufferString(data)), format: format, cost: 0.00125}
+}
+
+type fakeVoice struct {
+	io.ReadCloser
+	format    string
+	mediaType string
+	cost      float64
+	source    tts.Voice
+}
+
+func (v *fakeVoice) Format() string    { return v.format }
+func (v *fakeVoice) MediaType() string { return v.mediaType }
+func (v *fakeVoice) LoadCost(ctx context.Context) (float64, error) {
+	if v.source != nil {
+		return v.source.LoadCost(ctx)
+	}
+	return v.cost, nil
+}
+
+func (v *fakeVoice) Close() error {
+	err := v.ReadCloser.Close()
+	if v.source != nil {
+		_ = v.source.Close()
+	}
+	return err
 }

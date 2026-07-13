@@ -41,7 +41,7 @@ func TestFactoryCreateDefaultsAndEnvironmentKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	audio := readVoiceAudio(t, voice)
-	if string(audio) != "audio" || voice.Audio.Format != "mp3" || voice.Audio.MediaType != "audio/mpeg" {
+	if string(audio) != "audio" || voice.Format() != "mp3" || voice.MediaType() != "audio/mpeg" {
 		t.Fatalf("voice = %+v", voice)
 	}
 }
@@ -69,7 +69,7 @@ func TestFactoryMapKeyTakesPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = readVoiceAudio(t, voice)
-	if voice.Audio.Format != "pcm" || voice.Audio.MediaType != "audio/pcm" {
+	if voice.Format() != "pcm" || voice.MediaType() != "audio/pcm" {
 		t.Fatalf("voice = %+v", voice)
 	}
 }
@@ -102,18 +102,34 @@ func TestFactoryConfigurationErrors(t *testing.T) {
 
 func TestGenerateRequestAndMetadata(t *testing.T) {
 	const endpoint = "https://example.test/speech"
+	const generationEndpoint = "https://example.test/generation"
 	factory := NewFactory(
 		WithEndpoint(endpoint),
+		WithGenerationEndpoint(generationEndpoint),
 		WithHTTPClient(doerFunc(func(req *http.Request) (*http.Response, error) {
-			if req.Method != http.MethodPost || req.URL.String() != endpoint {
-				t.Fatalf("request = %s %s", req.Method, req.URL)
+			switch req.Method {
+			case http.MethodPost:
+				if req.URL.String() != endpoint {
+					t.Fatalf("request URL = %s", req.URL)
+				}
+				if got := req.Header.Get("Content-Type"); got != "application/json" {
+					t.Fatalf("Content-Type = %q", got)
+				}
+				resp := response(http.StatusOK, "audio/mpeg", []byte{1, 2, 3})
+				resp.Header.Set("X-Generation-Id", "generation-123")
+				return resp, nil
+			case http.MethodGet:
+				if req.URL.Path != "/generation" || req.URL.Query().Get("id") != "generation-123" {
+					t.Fatalf("cost request URL = %s", req.URL)
+				}
+				if got := req.Header.Get("Authorization"); got != "Bearer secret" {
+					t.Fatalf("Authorization = %q", got)
+				}
+				return response(http.StatusOK, "application/json", []byte(`{"data":{"total_cost":0.00125}}`)), nil
+			default:
+				t.Fatalf("method = %s", req.Method)
+				return nil, nil
 			}
-			if got := req.Header.Get("Content-Type"); got != "application/json" {
-				t.Fatalf("Content-Type = %q", got)
-			}
-			resp := response(http.StatusOK, "audio/mpeg", []byte{1, 2, 3})
-			resp.Header.Set("X-Generation-Id", "generation-123")
-			return resp, nil
 		})),
 	)
 	service, err := factory.Create(map[string]any{"model": "model", "api_key": "secret"})
@@ -126,8 +142,15 @@ func TestGenerateRequestAndMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	audio := readVoiceAudio(t, voice)
-	if !bytes.Equal(audio, []byte{1, 2, 3}) || voice.GenerationID != "generation-123" {
+	if !bytes.Equal(audio, []byte{1, 2, 3}) {
 		t.Fatalf("voice = %+v", voice)
+	}
+	cost, err := voice.LoadCost(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cost != 0.00125 {
+		t.Fatalf("cost = %v", cost)
 	}
 }
 
@@ -244,11 +267,11 @@ func response(status int, mediaType string, body []byte) *http.Response {
 
 func readVoiceAudio(t *testing.T, voice tts.Voice) []byte {
 	t.Helper()
-	data, err := io.ReadAll(voice.Audio.Data)
+	data, err := io.ReadAll(voice)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := voice.Audio.Data.Close(); err != nil {
+	if err := voice.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return data
