@@ -10,6 +10,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/anki-tts/ffmpeg"
 	"jlzhjp.dev/anki-tts/openrouter"
 	"jlzhjp.dev/anki-tts/tts"
 	"jlzhjp.dev/anki-tts/tui"
@@ -19,6 +20,7 @@ const configFileName = "config.toml"
 
 type config struct {
 	OpenRouter map[string]any `toml:"openrouter"`
+	FFmpeg     *ffmpeg.Config `toml:"ffmpeg"`
 }
 
 func main() {
@@ -41,13 +43,26 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	transformer, err := buildTransformer(cfg)
+	if err != nil {
+		return err
+	}
 
-	model := tui.New(context.Background(), anki.NewClient(), services)
-	_, err = tea.NewProgram(model).Run()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	model := tui.New(ctx, anki.NewClient(), services, transformer)
+	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
 	if err != nil {
 		return fmt.Errorf("run TUI: %w", err)
 	}
 	return nil
+}
+
+func buildTransformer(cfg config) (tts.Transformer, error) {
+	if cfg.FFmpeg == nil {
+		return nil, nil
+	}
+	return ffmpeg.New(*cfg.FFmpeg)
 }
 
 func loadConfig(path string) (config, error) {

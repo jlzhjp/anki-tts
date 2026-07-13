@@ -2,6 +2,9 @@ package tui
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -13,12 +16,12 @@ import (
 
 func TestWorkflowGeneratesStoresAndUpdates(t *testing.T) {
 	client := &fakeAnki{}
-	service := &fakeTTS{voice: tts.Voice{Data: []byte("audio bytes"), Format: "mp3"}}
+	service := &fakeTTS{voice: voice("audio bytes", "mp3")}
 	services := tts.NewContainer()
 	if err := services.Add("OpenRouter", service); err != nil {
 		t.Fatal(err)
 	}
-	m := New(context.Background(), client, services)
+	m := New(context.Background(), client, services, nil)
 	m = update(t, m, decksMsg{decks: []string{"Japanese"}})
 	m = pressEnter(t, m)
 	if m.deck != "Japanese" || !m.busy {
@@ -56,7 +59,7 @@ func TestWorkflowGeneratesStoresAndUpdates(t *testing.T) {
 }
 
 func TestCancelReturnsToDestination(t *testing.T) {
-	m := New(context.Background(), &fakeAnki{}, tts.NewContainer())
+	m := New(context.Background(), &fakeAnki{}, tts.NewContainer(), nil)
 	m.note = anki.Note{Fields: map[string]anki.Field{"Front": {Value: "text"}}}
 	m.screen = actionScreen
 	m.busy = false
@@ -69,7 +72,7 @@ func TestCancelReturnsToDestination(t *testing.T) {
 }
 
 func TestNoServicesShowsError(t *testing.T) {
-	m := New(context.Background(), &fakeAnki{}, tts.NewContainer())
+	m := New(context.Background(), &fakeAnki{}, tts.NewContainer(), nil)
 	m.screen = actionScreen
 	m.busy = false
 	m.setList("Destination field behavior", actionItems())
@@ -77,6 +80,86 @@ func TestNoServicesShowsError(t *testing.T) {
 	if m.screen != errorScreen || !strings.Contains(m.err.Error(), "no TTS services") {
 		t.Fatalf("screen=%v error=%v", m.screen, m.err)
 	}
+}
+
+func TestTransformationDeterminesUploadedMedia(t *testing.T) {
+	client := &fakeAnki{}
+	service := &fakeTTS{data: "provider audio", format: "wav"}
+	transformer := &fakeTransformer{output: "transformed audio", format: "mp3"}
+	m, namedService := readyToGenerateModel(t, client, service, transformer)
+
+	message := m.generateCmd(namedService)().(savedMsg)
+	if message.err != nil {
+		t.Fatal(message.err)
+	}
+	wantHash := sha256.Sum256([]byte("transformed audio"))
+	wantFilename := fmt.Sprintf("_anki-tts-42-%x.mp3", wantHash[:6])
+	if client.mediaFilename != wantFilename {
+		t.Fatalf("filename = %q, want %q", client.mediaFilename, wantFilename)
+	}
+	if string(client.mediaData) != "transformed audio" {
+		t.Fatalf("uploaded data = %q", client.mediaData)
+	}
+}
+
+func TestTransformationFailurePreventsAnkiChanges(t *testing.T) {
+	client := &fakeAnki{}
+	service := &fakeTTS{data: "provider audio", format: "wav"}
+	transformErr := errors.New("FFmpeg failed")
+	transformer := &fakeTransformer{errs: []error{transformErr}}
+	m, namedService := readyToGenerateModel(t, client, service, transformer)
+
+	message := m.generateCmd(namedService)().(savedMsg)
+	if !errors.Is(message.err, transformErr) {
+		t.Fatalf("error = %v", message.err)
+	}
+	if client.storeCalls != 0 || client.updateCalls != 0 {
+		t.Fatalf("Anki calls: store=%d update=%d", client.storeCalls, client.updateCalls)
+	}
+}
+
+func TestRetryRepeatsTransformation(t *testing.T) {
+	client := &fakeAnki{}
+	service := &fakeTTS{data: "provider audio", format: "wav"}
+	transformer := &fakeTransformer{
+		errs:   []error{errors.New("temporary FFmpeg failure"), nil},
+		output: "retry output",
+		format: "mp3",
+	}
+	m, namedService := readyToGenerateModel(t, client, service, transformer)
+
+	failedMessage := m.generateCmd(namedService)().(savedMsg)
+	m = update(t, m, failedMessage)
+	if m.retry == nil || m.screen != errorScreen {
+		t.Fatalf("retry=%v screen=%v", m.retry, m.screen)
+	}
+	retriedMessage := m.retry().(savedMsg)
+	if retriedMessage.err != nil {
+		t.Fatal(retriedMessage.err)
+	}
+	if transformer.calls != 2 || service.calls != 2 {
+		t.Fatalf("calls: transform=%d generate=%d", transformer.calls, service.calls)
+	}
+	if client.storeCalls != 1 || client.updateCalls != 1 {
+		t.Fatalf("Anki calls: store=%d update=%d", client.storeCalls, client.updateCalls)
+	}
+}
+
+func readyToGenerateModel(t *testing.T, client *fakeAnki, service *fakeTTS, transformer tts.Transformer) (Model, tts.NamedService) {
+	t.Helper()
+	services := tts.NewContainer()
+	if err := services.Add("OpenRouter", service); err != nil {
+		t.Fatal(err)
+	}
+	m := New(context.Background(), client, services, transformer)
+	m.note = anki.Note{ID: 42, Fields: map[string]anki.Field{
+		"Front": {Value: "hello"},
+		"Audio": {},
+	}}
+	m.sourceField = "Front"
+	m.destinationField = "Audio"
+	m.destinationAction = overrideAction
+	return m, tts.NamedService{Name: "OpenRouter", Service: service}
 }
 
 const audioHashPrefix = "ef71589075cc"
@@ -98,28 +181,63 @@ func pressEnter(t *testing.T, model Model) Model {
 
 type fakeAnki struct {
 	mediaFilename string
+	mediaData     []byte
 	update        anki.NoteUpdate
+	storeCalls    int
+	updateCalls   int
 }
 
 func (*fakeAnki) ListDecks(context.Context) ([]string, error) { return nil, nil }
 func (*fakeAnki) ListNotes(context.Context, string) ([]anki.Note, error) {
 	return nil, nil
 }
-func (f *fakeAnki) StoreMediaFile(_ context.Context, filename string, _ []byte) (string, error) {
+func (f *fakeAnki) StoreMediaFile(_ context.Context, filename string, data []byte) (string, error) {
+	f.storeCalls++
 	f.mediaFilename = filename
-	return filename, nil
+	f.mediaData = append([]byte(nil), data...)
+	return f.mediaFilename, nil
 }
 func (f *fakeAnki) UpdateNote(_ context.Context, update anki.NoteUpdate) error {
+	f.updateCalls++
 	f.update = update
 	return nil
 }
 
 type fakeTTS struct {
-	input tts.Input
-	voice tts.Voice
+	input  tts.Input
+	voice  tts.Voice
+	data   string
+	format string
+	calls  int
 }
 
 func (f *fakeTTS) Generate(_ context.Context, input tts.Input) (tts.Voice, error) {
+	f.calls++
 	f.input = input
+	if f.data != "" {
+		return voice(f.data, f.format), nil
+	}
 	return f.voice, nil
+}
+
+type fakeTransformer struct {
+	errs   []error
+	output string
+	format string
+	calls  int
+}
+
+func (f *fakeTransformer) Transform(_ context.Context, input tts.Voice) (tts.Voice, error) {
+	call := f.calls
+	f.calls++
+	if call < len(f.errs) && f.errs[call] != nil {
+		return tts.Voice{}, f.errs[call]
+	}
+	input.Data = []byte(f.output)
+	input.Format = f.format
+	return input, nil
+}
+
+func voice(data, format string) tts.Voice {
+	return tts.Voice{Data: []byte(data), Format: format}
 }

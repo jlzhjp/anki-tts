@@ -21,6 +21,11 @@ type Service interface {
 	Generate(ctx context.Context, input Input) (Voice, error)
 }
 
+// Transformer applies a provider-neutral transformation to generated audio.
+type Transformer interface {
+	Transform(ctx context.Context, voice Voice) (Voice, error)
+}
+
 // Input describes text to synthesize.
 type Input struct {
 	Text string

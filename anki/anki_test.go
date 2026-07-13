@@ -110,19 +110,30 @@ func TestUpdateNotes(t *testing.T) {
 }
 
 func TestStoreMediaFile(t *testing.T) {
-	client := testClient(t, func(t *testing.T, got request) any {
-		if got.Action != "storeMediaFile" {
-			t.Fatalf("action = %q, want storeMediaFile", got.Action)
+	client := NewClient(WithHTTPClient(doerFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatal(err)
 		}
-		params := decodeParams[struct {
-			Filename string `json:"filename"`
-			Data     string `json:"data"`
-		}](t, got.Params)
-		if params.Filename != "_anki-tts.mp3" || params.Data != "YXVkaW8=" {
-			t.Fatalf("params = %+v", params)
+		if req.ContentLength != int64(len(body)) || len(req.TransferEncoding) != 0 {
+			t.Fatalf("ContentLength=%d body=%d TransferEncoding=%v", req.ContentLength, len(body), req.TransferEncoding)
 		}
-		return "_anki-tts.mp3"
-	})
+		var got struct {
+			Action  string `json:"action"`
+			Version int    `json:"version"`
+			Params  struct {
+				Filename string `json:"filename"`
+				Data     string `json:"data"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Action != "storeMediaFile" || got.Version != apiVersion || got.Params.Filename != "_anki-tts.mp3" || got.Params.Data != "YXVkaW8=" {
+			t.Fatalf("request = %+v", got)
+		}
+		return jsonResponse(`{"result":"_anki-tts.mp3","error":null}`), nil
+	})))
 
 	filename, err := client.StoreMediaFile(context.Background(), "_anki-tts.mp3", []byte("audio"))
 	if err != nil {

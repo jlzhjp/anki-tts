@@ -177,7 +177,8 @@ func (c *Client) UpdateNotes(ctx context.Context, updates []NoteUpdate) error {
 }
 
 // StoreMediaFile stores data in Anki's media collection and returns the
-// filename accepted by AnkiConnect.
+// filename accepted by AnkiConnect. Base64 is encoded directly into the HTTP
+// request body instead of allocating a second encoded copy of data.
 func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byte) (string, error) {
 	if strings.TrimSpace(filename) == "" {
 		return "", errors.New("store media file: filename is required")
@@ -189,18 +190,77 @@ func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byt
 		return "", errors.New("store media file: data is required")
 	}
 
-	params := struct {
-		Filename string `json:"filename"`
-		Data     string `json:"data"`
-	}{Filename: filename, Data: base64.StdEncoding.EncodeToString(data)}
-	var storedFilename string
-	if err := c.invoke(ctx, "storeMediaFile", params, &storedFilename); err != nil {
-		return "", fmt.Errorf("store media file %q: %w", filename, err)
+	encodedFilename, err := json.Marshal(filename)
+	if err != nil {
+		return "", fmt.Errorf("store media file %q: encode filename: %w", filename, err)
 	}
-	if storedFilename == "" {
-		storedFilename = filename
+	prefix := []byte(fmt.Sprintf(`{"action":"storeMediaFile","version":%d,"params":{"filename":%s,"data":"`, apiVersion, encodedFilename))
+	suffix := []byte(`"}}`)
+	contentLength := int64(len(prefix) + base64.StdEncoding.EncodedLen(len(data)) + len(suffix))
+
+	reader, writer := io.Pipe()
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := writer.Write(prefix)
+		if err == nil {
+			encoder := base64.NewEncoder(base64.StdEncoding, writer)
+			_, err = io.Copy(encoder, bytes.NewReader(data))
+			if closeErr := encoder.Close(); err == nil {
+				err = closeErr
+			}
+		}
+		if err == nil {
+			_, err = writer.Write(suffix)
+		}
+		_ = writer.CloseWithError(err)
+		writeResult <- err
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, reader)
+	if err != nil {
+		_ = reader.CloseWithError(err)
+		<-writeResult
+		return "", fmt.Errorf("store media file %q: create request: %w", filename, err)
 	}
-	return storedFilename, nil
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = contentLength
+	resp, requestErr := c.httpClient.Do(req)
+	if requestErr != nil {
+		_ = reader.CloseWithError(requestErr)
+	}
+	streamErr := <-writeResult
+	if streamErr != nil {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		return "", fmt.Errorf("store media file %q: encode request: %w", filename, streamErr)
+	}
+	if requestErr != nil {
+		return "", fmt.Errorf("store media file %q: send request: %w", filename, requestErr)
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
+	if err != nil {
+		return "", fmt.Errorf("store media file %q: read response: %w", filename, err)
+	}
+	if len(responseBody) > maxResponseSize {
+		return "", fmt.Errorf("store media file %q: response exceeds %d bytes", filename, maxResponseSize)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("store media file %q: unexpected HTTP status %s: %s", filename, resp.Status, strings.TrimSpace(string(responseBody)))
+	}
+	var wrapper response[string]
+	if err := json.Unmarshal(responseBody, &wrapper); err != nil {
+		return "", fmt.Errorf("store media file %q: decode response: %w", filename, err)
+	}
+	if wrapper.Error != nil {
+		return "", fmt.Errorf("store media file %q: %s", filename, *wrapper.Error)
+	}
+	if wrapper.Result == "" {
+		wrapper.Result = filename
+	}
+	return wrapper.Result, nil
 }
 
 func (c *Client) invoke(ctx context.Context, action string, params, result any) error {

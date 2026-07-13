@@ -48,19 +48,20 @@ const (
 
 // Model is the Bubble Tea application model.
 type Model struct {
-	ctx        context.Context
-	anki       AnkiClient
-	services   *tts.Container
-	list       list.Model
-	initialCmd tea.Cmd
-	screen     screen
-	backScreen screen
-	width      int
-	height     int
-	busy       bool
-	err        error
-	retry      tea.Cmd
-	status     string
+	ctx         context.Context
+	anki        AnkiClient
+	services    *tts.Container
+	transformer tts.Transformer
+	list        list.Model
+	initialCmd  tea.Cmd
+	screen      screen
+	backScreen  screen
+	width       int
+	height      int
+	busy        bool
+	err         error
+	retry       tea.Cmd
+	status      string
 
 	deck              string
 	notes             []anki.Note
@@ -71,7 +72,7 @@ type Model struct {
 }
 
 // New creates a TUI model.
-func New(ctx context.Context, client AnkiClient, services *tts.Container) Model {
+func New(ctx context.Context, client AnkiClient, services *tts.Container, transformer tts.Transformer) Model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -84,7 +85,7 @@ func New(ctx context.Context, client AnkiClient, services *tts.Container) Model 
 	l.SetFilteringEnabled(true)
 	l.DisableQuitKeybindings()
 	spinnerCmd := l.StartSpinner()
-	model := Model{ctx: ctx, anki: client, services: services, list: l, initialCmd: spinnerCmd, screen: deckScreen, width: 80, height: 24, busy: true}
+	model := Model{ctx: ctx, anki: client, services: services, transformer: transformer, list: l, initialCmd: spinnerCmd, screen: deckScreen, width: 80, height: 24, busy: true}
 	if len(services.Services()) == 0 {
 		model.list.StopSpinner()
 		model.screen = errorScreen
@@ -233,7 +234,11 @@ func (m Model) selectCurrent() (tea.Model, tea.Cmd) {
 	case serviceScreen:
 		service := item.value.(tts.NamedService)
 		m.busy = true
-		m.list.Title = "Generating voice with " + service.Name
+		if m.transformer == nil {
+			m.list.Title = "Generating voice with " + service.Name
+		} else {
+			m.list.Title = "Generating and transforming audio with " + service.Name
+		}
 		spinnerCmd := m.list.StartSpinner()
 		return m, tea.Batch(spinnerCmd, m.generateCmd(service))
 	}
@@ -319,6 +324,15 @@ func (m Model) generateCmd(service tts.NamedService) tea.Cmd {
 		voice, err := service.Service.Generate(m.ctx, tts.Input{Text: text})
 		if err != nil {
 			return savedMsg{service: service, err: err}
+		}
+		if len(voice.Data) == 0 {
+			return savedMsg{service: service, err: errors.New("TTS service returned no audio data")}
+		}
+		if m.transformer != nil {
+			voice, err = m.transformer.Transform(m.ctx, voice)
+			if err != nil {
+				return savedMsg{service: service, err: err}
+			}
 		}
 		format := safeFormat(voice.Format)
 		if format == "" {

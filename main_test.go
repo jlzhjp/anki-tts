@@ -3,7 +3,10 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"jlzhjp.dev/anki-tts/ffmpeg"
 )
 
 func TestLoadConfigAndBuildServices(t *testing.T) {
@@ -36,4 +39,84 @@ func TestBuildServicesWithoutProviders(t *testing.T) {
 	if len(services.Services()) != 0 {
 		t.Fatalf("services = %+v", services.Services())
 	}
+}
+
+func TestLoadFFmpegConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(`[ffmpeg]
+format = "mp3"
+args = ["-codec:a", "libmp3lame", "-b:a", "64k"]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.FFmpeg == nil || cfg.FFmpeg.Format != "mp3" || len(cfg.FFmpeg.Args) != 4 || cfg.FFmpeg.Args[3] != "64k" {
+		t.Fatalf("FFmpeg config = %+v", cfg.FFmpeg)
+	}
+}
+
+func TestBuildTransformer(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		transformer, err := buildTransformer(config{})
+		if err != nil || transformer != nil {
+			t.Fatalf("transformer=%v error=%v", transformer, err)
+		}
+	})
+
+	t.Run("valid", func(t *testing.T) {
+		directory := t.TempDir()
+		executable := filepath.Join(directory, "ffmpeg")
+		if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", directory)
+		transformer, err := buildTransformer(configFromFFmpeg("mp3"))
+		if err != nil || transformer == nil {
+			t.Fatalf("transformer=%v error=%v", transformer, err)
+		}
+	})
+
+	for _, test := range []struct {
+		name   string
+		format string
+		want   string
+	}{
+		{name: "missing format", format: "", want: "format must be"},
+		{name: "unsafe extension", format: "../mp3", want: "format must be"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := buildTransformer(configFromFFmpeg(test.format))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+
+	t.Run("missing executable", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		_, err := buildTransformer(configFromFFmpeg("mp3"))
+		if err == nil || !strings.Contains(err.Error(), "find ffmpeg executable") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestLoadFFmpegConfigRejectsNonStringArgument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[ffmpeg]\nformat = \"mp3\"\nargs = [1]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "string") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func configFromFFmpeg(format string) config {
+	cfg := config{}
+	cfg.FFmpeg = &ffmpeg.Config{Format: format}
+	return cfg
 }
