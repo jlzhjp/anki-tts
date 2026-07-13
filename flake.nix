@@ -67,11 +67,14 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
+              deadnix
               ffmpeg
               go
               gopls
               gotools
+              nixd
               nixfmt
+              statix
             ];
           };
         }
