@@ -1,12 +1,8 @@
 package tui
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
 
@@ -14,181 +10,120 @@ import (
 
 	"jlzhjp.dev/anki-tts/anki"
 	"jlzhjp.dev/anki-tts/tts"
+	"jlzhjp.dev/anki-tts/workflow"
 )
 
-func TestWorkflowGeneratesStoresAndUpdates(t *testing.T) {
-	client := &fakeAnki{}
-	service := &fakeTTS{voice: voice("audio bytes", "mp3")}
-	services := tts.NewContainer()
-	if err := services.Add("OpenRouter", service); err != nil {
-		t.Fatal(err)
-	}
-	m := New(context.Background(), client, services, nil)
-	m = update(t, m, decksMsg{decks: []string{"Japanese"}})
+func TestComposableWorkflowNavigationAndContext(t *testing.T) {
+	app := &fakeWorkflow{services: []tts.NamedService{{Name: "OpenRouter", Service: fakeService{}}}}
+	m := New(context.Background(), app)
+	m = update(t, m, decksLoadedMsg{decks: []string{"Japanese", "English"}})
+	deck := m.active().(*deckModel)
+	deck.list.Select(1)
 	m = pressEnter(t, m)
-	if m.deck != "Japanese" || !m.busy {
-		t.Fatalf("deck state = %q, busy=%v", m.deck, m.busy)
+	if len(m.screens) != 2 || m.deck != "Japanese" {
+		t.Fatalf("screens=%d deck=%q", len(m.screens), m.deck)
 	}
 
-	note := anki.Note{ID: 42, ModelName: "Basic", Fields: map[string]anki.Field{
-		"Front": {Value: `<b>Hello</b>&nbsp;world`, Order: 0},
-		"Audio": {Value: "existing", Order: 1},
-	}}
-	m = update(t, m, notesMsg{notes: []anki.Note{note}})
-	m = pressEnter(t, m) // note
+	note := testNote()
+	m = update(t, m, notesLoadedMsg{notes: []anki.Note{note}})
+	m = pressEnter(t, m)
 	m = pressEnter(t, m) // source: Front
-	m.list.Select(1)
-	m = pressEnter(t, m) // destination: Audio
-	m.list.Select(1)
-	m = pressEnter(t, m) // append
-	m = pressEnter(t, m) // service
+	if view := m.View().Content; !strings.Contains(view, "Deck: Japanese") || !strings.Contains(view, "Source: Front") {
+		t.Fatalf("view missing context: %q", view)
+	}
 
-	msg := m.generateCmd(tts.NamedService{Name: "OpenRouter", Service: service})()
-	saved, ok := msg.(savedMsg)
-	if !ok || saved.err != nil {
-		t.Fatalf("generate message = %#v", msg)
-	}
-	if saved.cost == nil || *saved.cost != 0.00125 {
-		t.Fatalf("saved cost = %v, error = %v", saved.cost, saved.costErr)
-	}
-	if service.input.Text != "Hello world" {
-		t.Fatalf("TTS input = %q", service.input.Text)
-	}
-	if client.mediaFilename != "anki-tts-42-"+audioHashPrefix+".mp3" {
-		t.Fatalf("media filename = %q", client.mediaFilename)
-	}
-	wantField := "existing<br>[sound:" + client.mediaFilename + "]"
-	if got := client.update.Fields["Audio"]; got != wantField {
-		t.Fatalf("updated Audio = %q, want %q", got, wantField)
-	}
-	m = update(t, m, saved)
-	m = update(t, m, notesMsg{notes: []anki.Note{note}})
-	if view := m.View().Content; !strings.Contains(view, "Cost: $0.001250") {
-		t.Fatalf("view = %q", view)
+	source := m.screens[2].(*fieldModel)
+	source.list.Select(1)
+	m, _ = updateWithCmd(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.active() != source || source.list.Index() != 1 {
+		t.Fatalf("source screen state was not preserved")
 	}
 }
 
-func TestCancelReturnsToDestination(t *testing.T) {
-	m := New(context.Background(), &fakeAnki{}, tts.NewContainer(), nil)
-	m.note = anki.Note{Fields: map[string]anki.Field{"Front": {Value: "text"}}}
-	m.screen = actionScreen
-	m.busy = false
-	m.setList("Destination field behavior", actionItems())
-	m.list.Select(2)
-	m = pressEnter(t, m)
-	if m.screen != destinationScreen {
-		t.Fatalf("screen = %v, want destination", m.screen)
+func TestSuccessfulGenerationRefreshesNotesAndShowsStatus(t *testing.T) {
+	cost := 0.00125
+	service := tts.NamedService{Name: "OpenRouter", Service: fakeService{}}
+	app := &fakeWorkflow{
+		services: []tts.NamedService{service},
+		result:   workflow.GenerateResult{Filename: "voice.mp3", Cost: &cost},
+	}
+	m := readyAtService(t, app, service)
+	m = pressEnterRunning(t, m)
+	if len(m.screens) != 2 {
+		t.Fatalf("screens=%d, want note screen", len(m.screens))
+	}
+	notes := m.active().(*noteModel)
+	if !notes.busy {
+		t.Fatal("note refresh did not start")
+	}
+	m = update(t, m, notesLoadedMsg{notes: []anki.Note{testNote()}})
+	if view := m.View().Content; !strings.Contains(view, "Cost: $0.001250") || !strings.Contains(view, "Saved voice.mp3 to Audio") {
+		t.Fatalf("view=%q", view)
+	}
+	if app.request.SourceField != "Front" || app.request.DestinationField != "Audio" {
+		t.Fatalf("request=%+v", app.request)
 	}
 }
 
-func TestNoServicesShowsError(t *testing.T) {
-	m := New(context.Background(), &fakeAnki{}, tts.NewContainer(), nil)
-	m.screen = actionScreen
-	m.busy = false
-	m.setList("Destination field behavior", actionItems())
-	m = pressEnter(t, m)
-	if m.screen != errorScreen || !strings.Contains(m.err.Error(), "no TTS services") {
-		t.Fatalf("screen=%v error=%v", m.screen, m.err)
+func TestGenerationErrorCanRetry(t *testing.T) {
+	service := tts.NamedService{Name: "OpenRouter", Service: fakeService{}}
+	app := &fakeWorkflow{services: []tts.NamedService{service}, errs: []error{errors.New("temporary failure"), nil}, result: workflow.GenerateResult{Filename: "voice.mp3"}}
+	m := readyAtService(t, app, service)
+	m = pressEnterRunning(t, m)
+	if m.failure == nil || m.failure.retry == nil {
+		t.Fatalf("failure=%+v", m.failure)
+	}
+	m = pressEnterRunning(t, m)
+	if m.failure != nil || len(m.screens) != 2 || app.generateCalls != 2 {
+		t.Fatalf("failure=%v screens=%d calls=%d", m.failure, len(m.screens), app.generateCalls)
 	}
 }
 
-func TestTransformationDeterminesUploadedMedia(t *testing.T) {
-	client := &fakeAnki{}
-	service := &fakeTTS{data: "provider audio", format: "wav"}
-	transformer := &fakeTransformer{output: "transformed audio", format: "mp3"}
-	m, namedService := readyToGenerateModel(t, client, service, transformer)
-
-	message := m.generateCmd(namedService)().(savedMsg)
-	if message.err != nil {
-		t.Fatal(message.err)
-	}
-	wantHash := sha256.Sum256([]byte("transformed audio"))
-	wantFilename := fmt.Sprintf("anki-tts-42-%x.mp3", wantHash[:6])
-	if client.mediaFilename != wantFilename {
-		t.Fatalf("filename = %q, want %q", client.mediaFilename, wantFilename)
-	}
-	if string(client.mediaData) != "transformed audio" {
-		t.Fatalf("uploaded data = %q", client.mediaData)
+func TestNoServicesShowsInitialError(t *testing.T) {
+	m := New(context.Background(), &fakeWorkflow{})
+	if m.failure == nil || !strings.Contains(m.View().Content, "no TTS services") {
+		t.Fatalf("failure=%v view=%q", m.failure, m.View().Content)
 	}
 }
 
-func TestTransformationFailurePreventsAnkiChanges(t *testing.T) {
-	client := &fakeAnki{}
-	service := &fakeTTS{data: "provider audio", format: "wav"}
-	transformErr := errors.New("FFmpeg failed")
-	transformer := &fakeTransformer{errs: []error{transformErr}}
-	m, namedService := readyToGenerateModel(t, client, service, transformer)
-
-	message := m.generateCmd(namedService)().(savedMsg)
-	if !errors.Is(message.err, transformErr) {
-		t.Fatalf("error = %v", message.err)
+func TestQuitAndResizeAreCoordinatedByRoot(t *testing.T) {
+	app := &fakeWorkflow{services: []tts.NamedService{{Name: "OpenRouter", Service: fakeService{}}}}
+	m := New(context.Background(), app)
+	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	deck := m.active().(*deckModel)
+	if deck.list.Width() != 100 || deck.list.Height() >= 30 {
+		t.Fatalf("list size=%dx%d", deck.list.Width(), deck.list.Height())
 	}
-	if client.storeCalls != 0 || client.updateCalls != 0 {
-		t.Fatalf("Anki calls: store=%d update=%d", client.storeCalls, client.updateCalls)
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if cmd == nil {
+		t.Fatal("q did not produce a quit command")
 	}
 }
 
-func TestTransformationStreamFailurePreventsAnkiChanges(t *testing.T) {
-	client := &fakeAnki{}
-	service := &fakeTTS{data: "provider audio", format: "wav"}
-	streamErr := errors.New("FFmpeg execution failed")
-	transformer := &fakeTransformer{streamErr: streamErr, format: "mp3"}
-	m, namedService := readyToGenerateModel(t, client, service, transformer)
-
-	message := m.generateCmd(namedService)().(savedMsg)
-	if !errors.Is(message.err, streamErr) {
-		t.Fatalf("error = %v", message.err)
-	}
-	if client.storeCalls != 0 || client.updateCalls != 0 {
-		t.Fatalf("Anki calls: store=%d update=%d", client.storeCalls, client.updateCalls)
-	}
-}
-
-func TestRetryRepeatsTransformation(t *testing.T) {
-	client := &fakeAnki{}
-	service := &fakeTTS{data: "provider audio", format: "wav"}
-	transformer := &fakeTransformer{
-		errs:   []error{errors.New("temporary FFmpeg failure"), nil},
-		output: "retry output",
-		format: "mp3",
-	}
-	m, namedService := readyToGenerateModel(t, client, service, transformer)
-
-	failedMessage := m.generateCmd(namedService)().(savedMsg)
-	m = update(t, m, failedMessage)
-	if m.retry == nil || m.screen != errorScreen {
-		t.Fatalf("retry=%v screen=%v", m.retry, m.screen)
-	}
-	retriedMessage := m.retry().(savedMsg)
-	if retriedMessage.err != nil {
-		t.Fatal(retriedMessage.err)
-	}
-	if transformer.calls != 2 || service.calls != 2 {
-		t.Fatalf("calls: transform=%d generate=%d", transformer.calls, service.calls)
-	}
-	if client.storeCalls != 1 || client.updateCalls != 1 {
-		t.Fatalf("Anki calls: store=%d update=%d", client.storeCalls, client.updateCalls)
-	}
-}
-
-func readyToGenerateModel(t *testing.T, client *fakeAnki, service *fakeTTS, transformer tts.Transformer) (Model, tts.NamedService) {
+func readyAtService(t *testing.T, app *fakeWorkflow, service tts.NamedService) Model {
 	t.Helper()
-	services := tts.NewContainer()
-	if err := services.Add("OpenRouter", service); err != nil {
-		t.Fatal(err)
+	m := New(context.Background(), app)
+	m = update(t, m, decksLoadedMsg{decks: []string{"Japanese"}})
+	m = pressEnter(t, m)
+	m = update(t, m, notesLoadedMsg{notes: []anki.Note{testNote()}})
+	m = pressEnter(t, m) // note
+	m = pressEnter(t, m) // source
+	field := m.active().(*fieldModel)
+	field.list.Select(1)
+	m = pressEnter(t, m) // destination: Audio
+	m = pressEnter(t, m) // override
+	if got := m.active().(*serviceModel).list.SelectedItem().(item).value.(tts.NamedService); got.Name != service.Name {
+		t.Fatalf("service=%q", got.Name)
 	}
-	m := New(context.Background(), client, services, transformer)
-	m.note = anki.Note{ID: 42, Fields: map[string]anki.Field{
-		"Front": {Value: "hello"},
-		"Audio": {},
-	}}
-	m.sourceField = "Front"
-	m.destinationField = "Audio"
-	m.destinationAction = overrideAction
-	return m, tts.NamedService{Name: "OpenRouter", Service: service}
+	return m
 }
 
-const audioHashPrefix = "ef71589075cc"
+func testNote() anki.Note {
+	return anki.Note{ID: 42, ModelName: "Basic", Fields: map[string]anki.Field{
+		"Front": {Value: "Hello", Order: 0},
+		"Audio": {Value: "", Order: 1},
+	}}
+}
 
 func update(t *testing.T, model Model, msg tea.Msg) Model {
 	t.Helper()
@@ -200,110 +135,91 @@ func update(t *testing.T, model Model, msg tea.Msg) Model {
 	return result
 }
 
+func updateWithCmd(t *testing.T, model Model, msg tea.Msg) (Model, tea.Cmd) {
+	t.Helper()
+	updated, cmd := model.Update(msg)
+	result, ok := updated.(Model)
+	if !ok {
+		t.Fatalf("updated model has type %T", updated)
+	}
+	return result, cmd
+}
+
 func pressEnter(t *testing.T, model Model) Model {
 	t.Helper()
-	return update(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	model, cmd := updateWithCmd(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		return model
+	}
+	message := cmd()
+	if _, batched := message.(tea.BatchMsg); batched {
+		return model
+	}
+	return update(t, model, message)
 }
 
-type fakeAnki struct {
-	mediaFilename string
-	mediaData     []byte
-	update        anki.NoteUpdate
-	storeCalls    int
-	updateCalls   int
+func pressEnterRunning(t *testing.T, model Model) Model {
+	t.Helper()
+	model, cmd := updateWithCmd(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter did not produce a command")
+	}
+	message := cmd()
+	model, cmd = updateWithCmd(t, model, message)
+	if cmd == nil {
+		return model
+	}
+	message, ok := generatedFromCommand(cmd)
+	if !ok {
+		t.Fatal("command did not produce a generation result")
+	}
+	return update(t, model, message)
 }
 
-func (*fakeAnki) ListDecks(context.Context) ([]string, error) { return nil, nil }
-func (*fakeAnki) ListNotes(context.Context, string) ([]anki.Note, error) {
+func generatedFromCommand(cmd tea.Cmd) (tea.Msg, bool) {
+	message := cmd()
+	if _, ok := message.(generatedMsg); ok {
+		return message, true
+	}
+	batch, ok := message.(tea.BatchMsg)
+	if !ok {
+		return nil, false
+	}
+	for _, child := range batch {
+		if child == nil {
+			continue
+		}
+		if message, ok := generatedFromCommand(child); ok {
+			return message, true
+		}
+	}
+	return nil, false
+}
+
+type fakeWorkflow struct {
+	services      []tts.NamedService
+	result        workflow.GenerateResult
+	errs          []error
+	generateCalls int
+	request       workflow.GenerateRequest
+}
+
+func (f *fakeWorkflow) ListDecks(context.Context) ([]string, error) { return nil, nil }
+func (f *fakeWorkflow) ListNotes(context.Context, string) ([]anki.Note, error) {
 	return nil, nil
 }
-func (f *fakeAnki) StoreMediaFile(_ context.Context, filename string, data []byte) (string, error) {
-	f.storeCalls++
-	f.mediaFilename = filename
-	f.mediaData = append([]byte(nil), data...)
-	return f.mediaFilename, nil
-}
-func (f *fakeAnki) UpdateNote(_ context.Context, update anki.NoteUpdate) error {
-	f.updateCalls++
-	f.update = update
-	return nil
-}
-
-type fakeTTS struct {
-	input  tts.Input
-	voice  tts.Voice
-	data   string
-	format string
-	calls  int
-}
-
-func (f *fakeTTS) Generate(_ context.Context, input tts.Input) (tts.Voice, error) {
-	f.calls++
-	f.input = input
-	if f.data != "" {
-		return voice(f.data, f.format), nil
-	}
-	return f.voice, nil
-}
-
-type fakeTransformer struct {
-	errs      []error
-	output    string
-	format    string
-	calls     int
-	streamErr error
-}
-
-func (f *fakeTransformer) Transform(_ context.Context, input tts.Voice) (tts.Voice, error) {
-	_, _ = io.ReadAll(input)
-	call := f.calls
-	f.calls++
+func (f *fakeWorkflow) Services() []tts.NamedService { return f.services }
+func (f *fakeWorkflow) TransformsAudio() bool        { return false }
+func (f *fakeWorkflow) Generate(_ context.Context, request workflow.GenerateRequest) (workflow.GenerateResult, error) {
+	f.request = request
+	call := f.generateCalls
+	f.generateCalls++
 	if call < len(f.errs) && f.errs[call] != nil {
-		_ = input.Close()
-		return nil, f.errs[call]
+		return workflow.GenerateResult{}, f.errs[call]
 	}
-	var output io.ReadCloser
-	if f.streamErr != nil {
-		output = io.NopCloser(errorReader{err: f.streamErr})
-	} else {
-		output = io.NopCloser(bytes.NewBufferString(f.output))
-	}
-	return &fakeVoice{ReadCloser: output, format: f.format, mediaType: input.MediaType(), source: input}, nil
+	return f.result, nil
 }
 
-type errorReader struct {
-	err error
-}
+type fakeService struct{}
 
-func (r errorReader) Read([]byte) (int, error) {
-	return 0, r.err
-}
-
-func voice(data, format string) tts.Voice {
-	return &fakeVoice{ReadCloser: io.NopCloser(bytes.NewBufferString(data)), format: format, cost: 0.00125}
-}
-
-type fakeVoice struct {
-	io.ReadCloser
-	format    string
-	mediaType string
-	cost      float64
-	source    tts.Voice
-}
-
-func (v *fakeVoice) Format() string    { return v.format }
-func (v *fakeVoice) MediaType() string { return v.mediaType }
-func (v *fakeVoice) LoadCost(ctx context.Context) (float64, error) {
-	if v.source != nil {
-		return v.source.LoadCost(ctx)
-	}
-	return v.cost, nil
-}
-
-func (v *fakeVoice) Close() error {
-	err := v.ReadCloser.Close()
-	if v.source != nil {
-		_ = v.source.Close()
-	}
-	return err
-}
+func (fakeService) Generate(context.Context, tts.Input) (tts.Voice, error) { return nil, nil }

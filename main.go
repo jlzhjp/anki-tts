@@ -14,6 +14,7 @@ import (
 	"jlzhjp.dev/anki-tts/openrouter"
 	"jlzhjp.dev/anki-tts/tts"
 	"jlzhjp.dev/anki-tts/tui"
+	"jlzhjp.dev/anki-tts/workflow"
 )
 
 const configFileName = "config.toml"
@@ -50,7 +51,8 @@ func run() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	model := tui.New(ctx, anki.NewClient(), services, transformer)
+	appWorkflow := workflow.New(anki.NewClient(), services, transformer)
+	model := tui.New(ctx, appWorkflow)
 	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
 	if err != nil {
 		return fmt.Errorf("run TUI: %w", err)
