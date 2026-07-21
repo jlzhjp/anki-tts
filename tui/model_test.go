@@ -200,28 +200,28 @@ type fakeWorkflow struct {
 	result        workflow.GenerateResult
 	errs          []error
 	generateCalls int
-	request       workflow.GenerateRequest
+	request       workflow.GenerationSpec
 	selector      workflow.NoteSelector
 	notes         []anki.Note
 }
 
 func (f *fakeWorkflow) ListDecks(context.Context) ([]string, error) { return nil, nil }
-func (f *fakeWorkflow) ListNotes(context.Context, string) ([]anki.Note, error) {
-	return nil, nil
-}
 func (f *fakeWorkflow) SelectNotes(context.Context, workflow.NoteSelector) ([]anki.Note, error) {
 	return f.notes, nil
 }
 func (f *fakeWorkflow) Services() []tts.NamedService { return f.services }
 func (f *fakeWorkflow) TransformsAudio() bool        { return false }
-func (f *fakeWorkflow) Generate(_ context.Context, request workflow.GenerateRequest) (workflow.GenerateResult, error) {
+func (f *fakeWorkflow) Plan(request workflow.GenerationSpec) (workflow.Plan, error) {
 	f.request = request
+	return workflow.Plan{}, nil
+}
+func (f *fakeWorkflow) Execute(_ context.Context, _ workflow.Plan, _ workflow.PipelineOptions) (workflow.BatchResult, error) {
 	call := f.generateCalls
 	f.generateCalls++
 	if call < len(f.errs) && f.errs[call] != nil {
-		return workflow.GenerateResult{}, f.errs[call]
+		return workflow.BatchResult{}, f.errs[call]
 	}
-	return f.result, nil
+	return workflow.BatchResult{Items: []workflow.ItemResult{{Result: f.result}}}, nil
 }
 
 type fakeService struct{}

@@ -18,7 +18,7 @@ func TestGenerateStoresAndUpdates(t *testing.T) {
 	client := &fakeAnki{}
 	provider := &fakeTTS{voice: voice("audio bytes", "mp3")}
 	service := New(client, container(t, provider), nil)
-	result, err := service.Generate(context.Background(), request(provider, AppendDestination))
+	result, err := executeOne(context.Background(), service, spec(provider))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestGenerateStoresAndUpdates(t *testing.T) {
 	if client.mediaFilename != wantFilename {
 		t.Fatalf("filename=%q want=%q", client.mediaFilename, wantFilename)
 	}
-	wantField := "existing<br>[sound:" + wantFilename + "]"
+	wantField := "[sound:" + wantFilename + "]"
 	if client.update.Fields["Audio"] != wantField {
 		t.Fatalf("Audio=%q want=%q", client.update.Fields["Audio"], wantField)
 	}
@@ -44,7 +44,7 @@ func TestTransformationDeterminesUploadedMedia(t *testing.T) {
 	provider := &fakeTTS{voice: voice("provider audio", "wav")}
 	transformer := &fakeTransformer{output: "transformed audio", format: "mp3"}
 	service := New(client, container(t, provider), transformer)
-	_, err := service.Generate(context.Background(), request(provider, ReplaceDestination))
+	_, err := executeOne(context.Background(), service, spec(provider))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,13 +71,13 @@ func TestFailuresBeforeUploadLeaveAnkiUnchanged(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			client := &fakeAnki{}
 			service := New(client, container(t, test.provider), test.transformer)
-			req := request(test.provider, ReplaceDestination)
+			req := spec(test.provider)
 			if test.name == "empty source" {
-				field := req.Note.Fields["Front"]
+				field := req.Notes[0].Fields["Front"]
 				field.Value = "<br>"
-				req.Note.Fields["Front"] = field
+				req.Notes[0].Fields["Front"] = field
 			}
-			_, err := service.Generate(context.Background(), req)
+			_, err := executeOne(context.Background(), service, req)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error=%v want containing %q", err, test.want)
 			}
@@ -92,7 +92,7 @@ func TestCostFailureIsNonFatal(t *testing.T) {
 	client := &fakeAnki{}
 	provider := &fakeTTS{voice: &fakeVoice{ReadCloser: io.NopCloser(strings.NewReader("audio")), format: "mp3", costErr: errors.New("cost unavailable")}}
 	service := New(client, container(t, provider), nil)
-	result, err := service.Generate(context.Background(), request(provider, ReplaceDestination))
+	result, err := executeOne(context.Background(), service, spec(provider))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestFinalAudioValidationAndClosure(t *testing.T) {
 			voice := &fakeVoice{ReadCloser: io.NopCloser(bytes.NewReader(test.data)), format: test.format}
 			provider := &fakeTTS{voice: voice}
 			service := New(client, container(t, provider), nil)
-			_, err := service.Generate(context.Background(), request(provider, ReplaceDestination))
+			_, err := executeOne(context.Background(), service, spec(provider))
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error=%v want containing %q", err, test.want)
 			}
@@ -134,7 +134,7 @@ func TestFinalAudioValidationAndClosure(t *testing.T) {
 
 func TestMissingTTSServiceIsRejected(t *testing.T) {
 	service := New(&fakeAnki{}, tts.NewContainer(), nil)
-	_, err := service.Generate(context.Background(), GenerateRequest{})
+	_, err := service.Plan(GenerationSpec{})
 	if err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("error=%v", err)
 	}
@@ -144,7 +144,7 @@ func TestNoteUpdateFailureReportsStoredMedia(t *testing.T) {
 	client := &fakeAnki{updateErr: errors.New("update failed")}
 	provider := &fakeTTS{voice: voice("audio", "mp3")}
 	service := New(client, container(t, provider), nil)
-	_, err := service.Generate(context.Background(), request(provider, ReplaceDestination))
+	_, err := executeOne(context.Background(), service, spec(provider))
 	if err == nil || !strings.Contains(err.Error(), "was stored") || client.storeCalls != 1 {
 		t.Fatalf("error=%v stores=%d", err, client.storeCalls)
 	}
@@ -159,15 +159,33 @@ func container(t *testing.T, service tts.Service) *tts.Container {
 	return services
 }
 
-func request(service tts.Service, mode DestinationMode) GenerateRequest {
-	return GenerateRequest{
-		Note: anki.Note{ID: 42, Fields: map[string]anki.Field{
+func spec(service tts.Service) GenerationSpec {
+	return GenerationSpec{
+		Notes: []anki.Note{{ID: 42, Fields: map[string]anki.Field{
 			"Front": {Value: `<b>Hello</b>&nbsp;world`},
 			"Audio": {Value: "existing"},
-		}},
-		SourceField: "Front", DestinationField: "Audio", DestinationMode: mode,
+		}}},
+		SourceField: "Front", DestinationField: "Audio",
 		Service: tts.NamedService{Name: "OpenRouter", Service: service},
 	}
+}
+
+func executeOne(ctx context.Context, service *Service, request GenerationSpec) (GenerateResult, error) {
+	plan, err := service.Plan(request)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	batch, err := service.Execute(ctx, plan, PipelineOptions{
+		SynthesisConcurrency: 1,
+		AudioConcurrency:     1,
+	})
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	if len(batch.Items) != 1 {
+		return GenerateResult{}, fmt.Errorf("got %d results", len(batch.Items))
+	}
+	return batch.Items[0].Result, batch.Items[0].Err
 }
 
 type fakeAnki struct {

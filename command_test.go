@@ -24,9 +24,8 @@ func TestBatchConfirmsOverwriteAndProcessesEveryNote(t *testing.T) {
 	appWorkflow := workflow.New(client, services, nil)
 	var output bytes.Buffer
 	err := runBatch(context.Background(), appWorkflow, workflow.NoteSelector{}, commandOptions{
-		fromField: "Front",
-		toField:   "Audio",
-		service:   "Test",
+		fromField: "Front", toField: "Audio", service: "Test",
+		synthesisConcurrency: 2, audioConcurrency: 2,
 	}, strings.NewReader("yes\ny\n"), &output)
 	if err != nil {
 		t.Fatal(err)

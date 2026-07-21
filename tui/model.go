@@ -21,20 +21,22 @@ import (
 // Workflow contains the application operations used by the TUI.
 type Workflow interface {
 	ListDecks(context.Context) ([]string, error)
-	ListNotes(context.Context, string) ([]anki.Note, error)
 	SelectNotes(context.Context, workflow.NoteSelector) ([]anki.Note, error)
 	Services() []tts.NamedService
 	TransformsAudio() bool
-	Generate(context.Context, workflow.GenerateRequest) (workflow.GenerateResult, error)
+	Plan(workflow.GenerationSpec) (workflow.Plan, error)
+	Execute(context.Context, workflow.Plan, workflow.PipelineOptions) (workflow.BatchResult, error)
 }
 
 // Options constrains the interactive workflow and preselects generation values.
 type Options struct {
-	Selector  workflow.NoteSelector
-	FromField string
-	ToField   string
-	Service   string
-	Yes       bool
+	Selector             workflow.NoteSelector
+	FromField            string
+	ToField              string
+	Service              string
+	Yes                  bool
+	SynthesisConcurrency int
+	AudioConcurrency     int
 }
 
 type screenKind uint8
@@ -59,13 +61,11 @@ type Model struct {
 	status   string
 	options  Options
 
-	deck              string
-	note              anki.Note
-	sourceField       string
-	destinationField  string
-	destinationMode   workflow.DestinationMode
-	destinationAction destinationAction
-	service           tts.NamedService
+	deck             string
+	note             anki.Note
+	sourceField      string
+	destinationField string
+	service          tts.NamedService
 }
 
 // New creates a TUI model around an injected workflow.
@@ -154,18 +154,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearAfter(destinationScreen)
 		return m.afterDestinationSelected()
 	case actionSelectedMsg:
-		if msg.action == cancelAction {
-			m.destinationAction = ""
+		if !msg.confirmed {
 			m.service = tts.NamedService{}
 			return m.pop()
 		}
-		m.destinationAction = msg.action
-		m.destinationMode = workflow.ReplaceDestination
 		m.clearAfter(actionScreen)
 		return m.afterOverwriteConfirmed()
 	case serviceSelectedMsg:
 		m.service = msg.service
-		request := m.generateRequest(msg.service)
+		request := m.generationSpec(msg.service)
 		if serviceModel, ok := m.active().(*serviceModel); ok {
 			spinner := serviceModel.startGeneration(msg.service.Name, m.hasTransformerContext())
 			return m, tea.Batch(spinner, m.generateCmd(request))
@@ -269,10 +266,7 @@ func (m *Model) clearSelectionFrom(kind screenKind) {
 	case destinationScreen:
 		m.destinationField = ""
 		fallthrough
-	case actionScreen:
-		m.destinationAction = ""
-		fallthrough
-	case serviceScreen:
+	case actionScreen, serviceScreen:
 		m.service = tts.NamedService{}
 	}
 }
@@ -283,13 +277,13 @@ func (m *Model) clearAfter(kind screenKind) {
 	}
 	switch kind {
 	case deckScreen:
-		m.note, m.sourceField, m.destinationField, m.destinationAction, m.service = anki.Note{}, "", "", "", tts.NamedService{}
+		m.note, m.sourceField, m.destinationField, m.service = anki.Note{}, "", "", tts.NamedService{}
 	case noteScreen:
-		m.sourceField, m.destinationField, m.destinationAction, m.service = "", "", "", tts.NamedService{}
+		m.sourceField, m.destinationField, m.service = "", "", tts.NamedService{}
 	case sourceScreen:
-		m.destinationField, m.destinationAction, m.service = "", "", tts.NamedService{}
+		m.destinationField, m.service = "", tts.NamedService{}
 	case destinationScreen:
-		m.destinationAction, m.service = "", tts.NamedService{}
+		m.service = tts.NamedService{}
 	case actionScreen:
 		m.service = tts.NamedService{}
 	}
@@ -323,21 +317,17 @@ func (m Model) contextLine() string {
 	if m.destinationField != "" {
 		parts = append(parts, "Destination: "+m.destinationField)
 	}
-	if m.destinationAction != "" {
-		parts = append(parts, "Mode: "+string(m.destinationAction))
-	}
 	if m.service.Name != "" {
 		parts = append(parts, "Service: "+m.service.Name)
 	}
 	return strings.Join(parts, " · ")
 }
 
-func (m Model) generateRequest(service tts.NamedService) workflow.GenerateRequest {
-	return workflow.GenerateRequest{
-		Note:             m.note,
+func (m Model) generationSpec(service tts.NamedService) workflow.GenerationSpec {
+	return workflow.GenerationSpec{
+		Notes:            []anki.Note{m.note},
 		SourceField:      m.sourceField,
 		DestinationField: m.destinationField,
-		DestinationMode:  m.destinationMode,
 		Service:          service,
 	}
 }
@@ -351,7 +341,6 @@ func (m Model) afterSourceSelected() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) afterDestinationSelected() (tea.Model, tea.Cmd) {
-	m.destinationMode = workflow.ReplaceDestination
 	field, ok := m.note.Fields[m.destinationField]
 	if !ok {
 		m.failure = newErrorModel(fmt.Errorf("note %d has no field %q", m.note.ID, m.destinationField), nil)
@@ -369,7 +358,7 @@ func (m Model) afterOverwriteConfirmed() (tea.Model, tea.Cmd) {
 		for _, service := range services {
 			if service.Name == m.options.Service {
 				m.service = service
-				return m, m.generateCmd(m.generateRequest(service))
+				return m, m.generateCmd(m.generationSpec(service))
 			}
 		}
 		m.failure = newErrorModel(fmt.Errorf("TTS service %q is not configured", m.options.Service), nil)
@@ -382,10 +371,32 @@ func (m Model) afterOverwriteConfirmed() (tea.Model, tea.Cmd) {
 	return m.push(newServiceModel(services))
 }
 
-func (m Model) generateCmd(request workflow.GenerateRequest) tea.Cmd {
+func (m Model) generateCmd(request workflow.GenerationSpec) tea.Cmd {
 	return func() tea.Msg {
-		result, err := m.workflow.Generate(m.ctx, request)
-		return generatedMsg{request: request, result: result, err: err}
+		plan, err := m.workflow.Plan(request)
+		if err != nil {
+			return generatedMsg{request: request, err: err}
+		}
+		synthesisConcurrency := m.options.SynthesisConcurrency
+		if synthesisConcurrency <= 0 {
+			synthesisConcurrency = workflow.DefaultSynthesisConcurrency
+		}
+		audioConcurrency := m.options.AudioConcurrency
+		if audioConcurrency <= 0 {
+			audioConcurrency = workflow.DefaultAudioConcurrency
+		}
+		batch, err := m.workflow.Execute(m.ctx, plan, workflow.PipelineOptions{
+			SynthesisConcurrency: synthesisConcurrency,
+			AudioConcurrency:     audioConcurrency,
+		})
+		if err != nil {
+			return generatedMsg{request: request, err: err}
+		}
+		if len(batch.Items) != 1 {
+			return generatedMsg{request: request, err: fmt.Errorf("generation pipeline returned %d results, want 1", len(batch.Items))}
+		}
+		item := batch.Items[0]
+		return generatedMsg{request: request, result: item.Result, err: item.Err}
 	}
 }
 
@@ -407,7 +418,6 @@ func (m Model) returnToNotesAndRefresh() (tea.Model, tea.Cmd) {
 	m.note = anki.Note{}
 	m.sourceField = ""
 	m.destinationField = ""
-	m.destinationAction = ""
 	m.service = tts.NamedService{}
 	m.resizeScreens()
 	return m, cmd
@@ -634,7 +644,7 @@ func (m *actionModel) Init() tea.Cmd { return nil }
 func (m *actionModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := message.(tea.KeyPressMsg); ok && msg.String() == "enter" && !m.filtering() {
 		if selected, ok := m.selected(); ok {
-			return m, messageCmd(actionSelectedMsg{action: selected.value.(destinationAction)})
+			return m, messageCmd(actionSelectedMsg{confirmed: selected.value.(bool)})
 		}
 	}
 	return m, m.update(message)
@@ -702,13 +712,6 @@ func (m *errorModel) View() tea.View {
 	}
 	return tea.NewView(fmt.Sprintf("Error: %v\n\n%s\n", m.err, help))
 }
-
-type destinationAction string
-
-const (
-	overrideAction destinationAction = "Override"
-	cancelAction   destinationAction = "Cancel"
-)
 
 type noteCandidate struct {
 	note    anki.Note
@@ -796,8 +799,8 @@ func fieldItems(note anki.Note, nonEmpty bool) []list.Item {
 
 func actionItems() []list.Item {
 	return []list.Item{
-		item{title: string(overrideAction), description: "Replace the non-empty destination field", value: overrideAction},
-		item{title: string(cancelAction), description: "Return without generating audio", value: cancelAction},
+		item{title: "Replace", description: "Replace the non-empty destination field", value: true},
+		item{title: "Cancel", description: "Return without generating audio", value: false},
 	}
 }
 
@@ -830,10 +833,10 @@ type deckSelectedMsg struct{ deck string }
 type noteSelectedMsg struct{ note anki.Note }
 type sourceSelectedMsg struct{ field string }
 type destinationSelectedMsg struct{ field string }
-type actionSelectedMsg struct{ action destinationAction }
+type actionSelectedMsg struct{ confirmed bool }
 type serviceSelectedMsg struct{ service tts.NamedService }
 type generatedMsg struct {
-	request workflow.GenerateRequest
+	request workflow.GenerationSpec
 	result  workflow.GenerateResult
 	err     error
 }

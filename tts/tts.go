@@ -17,14 +17,16 @@ type ServiceFactory interface {
 	Create(config map[string]any) (Service, error)
 }
 
-// Service generates speech from text.
+// Service generates speech from text. Implementations must support concurrent
+// Generate calls from the workflow synthesis stage.
 type Service interface {
 	Generate(ctx context.Context, input Input) (Voice, error)
 }
 
-// Transformer applies a provider-neutral transformation to generated audio
-// and consumes ownership of the input Voice. On failure it closes the input;
-// on success the returned Voice owns the input and closes it when appropriate.
+// Transformer applies a provider-neutral transformation to generated audio.
+// Implementations must support concurrent Transform calls. Transform consumes
+// ownership of the input Voice: on failure it closes the input; on success the
+// returned Voice owns the input and closes it when appropriate.
 type Transformer interface {
 	Transform(ctx context.Context, voice Voice) (Voice, error)
 }

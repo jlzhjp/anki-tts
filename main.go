@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"charm.land/bubbletea/v2"
 	"github.com/BurntSushi/toml"
@@ -26,7 +28,9 @@ type config struct {
 }
 
 func main() {
-	if err := newRootCommand(os.Stdin, os.Stdout, os.Stderr).Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := newRootCommand(os.Stdin, os.Stdout, os.Stderr).ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
