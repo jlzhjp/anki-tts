@@ -11,6 +11,8 @@ import (
 	"sync"
 	"unicode"
 
+	"golang.org/x/sync/errgroup"
+
 	"jlzhjp.dev/anki-tts/anki"
 	"jlzhjp.dev/anki-tts/textutil"
 	"jlzhjp.dev/anki-tts/tts"
@@ -137,13 +139,7 @@ type preparedJob struct {
 	willOverwrite    bool
 }
 
-type synthesizedJob struct {
-	job   preparedJob
-	voice tts.Voice
-}
-
-type audioJob struct {
-	job      preparedJob
+type materializedAudio struct {
 	data     []byte
 	filename string
 	cost     *float64
@@ -246,111 +242,85 @@ func (s *Service) Execute(ctx context.Context, plan Plan, options PipelineOption
 		return results, nil
 	}
 
-	prepared := make(chan preparedJob)
-	synthesized := make(chan synthesizedJob)
-	audio := make(chan audioJob)
-	outcomes := make(chan ItemResult)
+	group, pipelineCtx := errgroup.WithContext(ctx)
+	prepared := make(chan pipelineItem[struct{}])
+	synthesized := make(chan pipelineItem[tts.Voice])
+	audio := make(chan pipelineItem[materializedAudio])
+	persisted := make(chan pipelineItem[GenerateResult])
 
-	go feedJobs(ctx, plan.jobs, prepared, outcomes)
-	go s.runSynthesisStage(ctx, prepared, synthesized, outcomes, options.SynthesisConcurrency)
-	go s.runAudioStage(ctx, synthesized, audio, outcomes, options.AudioConcurrency)
-	go s.runPersistenceStage(ctx, audio, outcomes)
+	group.Go(func() error { return feedJobs(pipelineCtx, plan.jobs, prepared) })
+	group.Go(func() error {
+		return mapConcurrent(pipelineCtx, options.SynthesisConcurrency, StageSynthesis, prepared, synthesized,
+			func(ctx context.Context, job preparedJob, _ struct{}) (tts.Voice, error) {
+				voice, err := job.service.Service.Generate(ctx, tts.Input{Text: job.text})
+				if err != nil {
+					return nil, err
+				}
+				if voice == nil {
+					return nil, errors.New("TTS service returned no voice")
+				}
+				return voice, nil
+			},
+			func(voice tts.Voice) {
+				if voice != nil {
+					_ = voice.Close()
+				}
+			})
+	})
+	group.Go(func() error {
+		return mapConcurrent(pipelineCtx, options.AudioConcurrency, StageAudio, synthesized, audio,
+			func(ctx context.Context, job preparedJob, voice tts.Voice) (materializedAudio, error) {
+				return s.materialize(ctx, job, voice)
+			}, nil)
+	})
+	group.Go(func() error {
+		return mapConcurrent(pipelineCtx, 1, StagePersistence, audio, persisted, s.persist, nil)
+	})
 
-	for outcome := range outcomes {
+	waitResult := make(chan error, 1)
+	go func() { waitResult <- group.Wait() }()
+	for item := range persisted {
+		outcome := ItemResult{
+			Index: item.job.index, NoteID: item.job.note.ID, Stage: StagePersistence,
+			Result: item.value,
+		}
+		if item.failure != nil {
+			outcome = *item.failure
+		}
 		results.Items[outcome.Index] = outcome
 		if options.OnResult != nil {
 			options.OnResult(outcome)
 		}
 	}
-	return results, ctx.Err()
+	waitErr := <-waitResult
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return results, ctxErr
+	}
+	return results, waitErr
 }
 
-func feedJobs(ctx context.Context, jobs []preparedJob, output chan<- preparedJob, outcomes chan<- ItemResult) {
+func feedJobs(ctx context.Context, jobs []preparedJob, output chan<- pipelineItem[struct{}]) error {
 	defer close(output)
-	for index, job := range jobs {
-		select {
-		case output <- job:
-		case <-ctx.Done():
-			for _, pending := range jobs[index:] {
-				outcomes <- failedResult(pending, StageSynthesis, ctx.Err())
-			}
-			return
+	for _, job := range jobs {
+		item := pipelineItem[struct{}]{job: job}
+		if err := ctx.Err(); err != nil {
+			failure := failedResult(job, StageSynthesis, err)
+			item.failure = &failure
 		}
+		output <- item
 	}
+	return nil
 }
 
-func (s *Service) runSynthesisStage(ctx context.Context, input <-chan preparedJob, output chan<- synthesizedJob, outcomes chan<- ItemResult, workers int) {
-	var group sync.WaitGroup
-	group.Add(workers)
-	for range workers {
-		go func() {
-			defer group.Done()
-			for job := range input {
-				if err := ctx.Err(); err != nil {
-					outcomes <- failedResult(job, StageSynthesis, err)
-					continue
-				}
-				voice, err := job.service.Service.Generate(ctx, tts.Input{Text: job.text})
-				if err != nil {
-					outcomes <- failedResult(job, StageSynthesis, err)
-					continue
-				}
-				if voice == nil {
-					outcomes <- failedResult(job, StageSynthesis, errors.New("TTS service returned no voice"))
-					continue
-				}
-				select {
-				case output <- synthesizedJob{job: job, voice: voice}:
-				case <-ctx.Done():
-					_ = voice.Close()
-					outcomes <- failedResult(job, StageSynthesis, ctx.Err())
-				}
-			}
-		}()
-	}
-	group.Wait()
-	close(output)
-}
-
-func (s *Service) runAudioStage(ctx context.Context, input <-chan synthesizedJob, output chan<- audioJob, outcomes chan<- ItemResult, workers int) {
-	var group sync.WaitGroup
-	group.Add(workers)
-	for range workers {
-		go func() {
-			defer group.Done()
-			for synthesized := range input {
-				if err := ctx.Err(); err != nil {
-					_ = synthesized.voice.Close()
-					outcomes <- failedResult(synthesized.job, StageAudio, err)
-					continue
-				}
-				item, err := s.materialize(ctx, synthesized)
-				if err != nil {
-					outcomes <- failedResult(synthesized.job, StageAudio, err)
-					continue
-				}
-				select {
-				case output <- item:
-				case <-ctx.Done():
-					outcomes <- failedResult(synthesized.job, StageAudio, ctx.Err())
-				}
-			}
-		}()
-	}
-	group.Wait()
-	close(output)
-}
-
-func (s *Service) materialize(ctx context.Context, synthesized synthesizedJob) (audioJob, error) {
-	voice := synthesized.voice
+func (s *Service) materialize(ctx context.Context, job preparedJob, voice tts.Voice) (materializedAudio, error) {
 	if s.transformer != nil {
 		transformed, err := s.transformer.Transform(ctx, voice)
 		if err != nil {
-			return audioJob{}, err
+			return materializedAudio{}, err
 		}
 		if transformed == nil {
 			_ = voice.Close()
-			return audioJob{}, errors.New("audio pipeline returned no voice")
+			return materializedAudio{}, errors.New("audio pipeline returned no voice")
 		}
 		voice = transformed
 	}
@@ -358,7 +328,7 @@ func (s *Service) materialize(ctx context.Context, synthesized synthesizedJob) (
 	format := safeFormat(voice.Format())
 	if format == "" {
 		_ = voice.Close()
-		return audioJob{}, fmt.Errorf("audio pipeline returned invalid format %q", voice.Format())
+		return materializedAudio{}, fmt.Errorf("audio pipeline returned invalid format %q", voice.Format())
 	}
 	var closeOnce sync.Once
 	var closeErr error
@@ -368,16 +338,16 @@ func (s *Service) materialize(ctx context.Context, synthesized synthesizedJob) (
 	stopCancellationClose()
 	closeVoice()
 	if readErr != nil {
-		return audioJob{}, fmt.Errorf("read final audio: %w", readErr)
+		return materializedAudio{}, fmt.Errorf("read final audio: %w", readErr)
 	}
 	if closeErr != nil {
-		return audioJob{}, fmt.Errorf("close final audio: %w", closeErr)
+		return materializedAudio{}, fmt.Errorf("close final audio: %w", closeErr)
 	}
 	if len(data) == 0 {
-		return audioJob{}, errors.New("audio pipeline returned empty data")
+		return materializedAudio{}, errors.New("audio pipeline returned empty data")
 	}
 	if len(data) > maxFinalAudioSize {
-		return audioJob{}, fmt.Errorf("final audio exceeds %d bytes", maxFinalAudioSize)
+		return materializedAudio{}, fmt.Errorf("final audio exceeds %d bytes", maxFinalAudioSize)
 	}
 
 	var cost *float64
@@ -386,36 +356,24 @@ func (s *Service) materialize(ctx context.Context, synthesized synthesizedJob) (
 		cost = &costValue
 	}
 	hash := sha256.Sum256(data)
-	filename := fmt.Sprintf("anki-tts-%d-%x.%s", synthesized.job.note.ID, hash[:6], format)
-	return audioJob{job: synthesized.job, data: data, filename: filename, cost: cost, costErr: costErr}, nil
+	filename := fmt.Sprintf("anki-tts-%d-%x.%s", job.note.ID, hash[:6], format)
+	return materializedAudio{data: data, filename: filename, cost: cost, costErr: costErr}, nil
 }
 
-func (s *Service) runPersistenceStage(ctx context.Context, input <-chan audioJob, outcomes chan<- ItemResult) {
-	defer close(outcomes)
-	for item := range input {
-		if err := ctx.Err(); err != nil {
-			outcomes <- failedResult(item.job, StagePersistence, err)
-			continue
-		}
-		storedFilename, err := s.anki.StoreMediaFile(ctx, item.filename, item.data)
-		if err != nil {
-			outcomes <- failedResult(item.job, StagePersistence, err)
-			continue
-		}
-		tag := "[sound:" + storedFilename + "]"
-		err = s.anki.UpdateNote(ctx, anki.NoteUpdate{
-			ID:     item.job.note.ID,
-			Fields: map[string]string{item.job.destinationField: tag},
-		})
-		if err != nil {
-			outcomes <- failedResult(item.job, StagePersistence, &PartialPersistenceError{Filename: storedFilename, Err: err})
-			continue
-		}
-		outcomes <- ItemResult{
-			Index: item.job.index, NoteID: item.job.note.ID, Stage: StagePersistence,
-			Result: GenerateResult{Filename: storedFilename, Cost: item.cost, CostErr: item.costErr},
-		}
+func (s *Service) persist(ctx context.Context, job preparedJob, audio materializedAudio) (GenerateResult, error) {
+	storedFilename, err := s.anki.StoreMediaFile(ctx, audio.filename, audio.data)
+	if err != nil {
+		return GenerateResult{}, err
 	}
+	tag := "[sound:" + storedFilename + "]"
+	err = s.anki.UpdateNote(ctx, anki.NoteUpdate{
+		ID:     job.note.ID,
+		Fields: map[string]string{job.destinationField: tag},
+	})
+	if err != nil {
+		return GenerateResult{}, &PartialPersistenceError{Filename: storedFilename, Err: err}
+	}
+	return GenerateResult{Filename: storedFilename, Cost: audio.cost, CostErr: audio.costErr}, nil
 }
 
 func failedResult(job preparedJob, stage Stage, err error) ItemResult {
