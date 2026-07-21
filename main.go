@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -25,35 +26,36 @@ type config struct {
 }
 
 func main() {
-	if err := run(); err != nil {
+	if err := newRootCommand(os.Stdin, os.Stdout, os.Stderr).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func buildWorkflow() (*workflow.Service, error) {
 	configHome, err := os.UserConfigDir()
 	if err != nil {
-		return fmt.Errorf("resolve user config directory: %w", err)
+		return nil, fmt.Errorf("resolve user config directory: %w", err)
 	}
 	cfg, err := loadConfig(filepath.Join(configHome, "anki-tts", configFileName))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	services, err := buildServices(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	transformer, err := buildTransformer(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	appWorkflow := workflow.New(anki.NewClient(), services, transformer)
-	model := tui.New(ctx, appWorkflow)
-	_, err = tea.NewProgram(model, tea.WithContext(ctx)).Run()
+	return workflow.New(anki.NewClient(), services, transformer), nil
+}
+
+func runTUI(ctx context.Context, appWorkflow *workflow.Service, options tui.Options, input io.Reader, output io.Writer) error {
+	model := tui.NewWithOptions(ctx, appWorkflow, options)
+	_, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output)).Run()
 	if err != nil {
 		return fmt.Errorf("run TUI: %w", err)
 	}

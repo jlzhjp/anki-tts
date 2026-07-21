@@ -111,7 +111,6 @@ func readyAtService(t *testing.T, app *fakeWorkflow, service tts.NamedService) M
 	field := m.active().(*fieldModel)
 	field.list.Select(1)
 	m = pressEnter(t, m) // destination: Audio
-	m = pressEnter(t, m) // override
 	if got := m.active().(*serviceModel).list.SelectedItem().(item).value.(tts.NamedService); got.Name != service.Name {
 		t.Fatalf("service=%q", got.Name)
 	}
@@ -202,11 +201,16 @@ type fakeWorkflow struct {
 	errs          []error
 	generateCalls int
 	request       workflow.GenerateRequest
+	selector      workflow.NoteSelector
+	notes         []anki.Note
 }
 
 func (f *fakeWorkflow) ListDecks(context.Context) ([]string, error) { return nil, nil }
 func (f *fakeWorkflow) ListNotes(context.Context, string) ([]anki.Note, error) {
 	return nil, nil
+}
+func (f *fakeWorkflow) SelectNotes(context.Context, workflow.NoteSelector) ([]anki.Note, error) {
+	return f.notes, nil
 }
 func (f *fakeWorkflow) Services() []tts.NamedService { return f.services }
 func (f *fakeWorkflow) TransformsAudio() bool        { return false }

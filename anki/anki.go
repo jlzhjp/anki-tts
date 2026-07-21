@@ -113,14 +113,36 @@ func (c *Client) ListDecks(ctx context.Context) ([]string, error) {
 	return decks, nil
 }
 
-// ListNotes returns all notes in deck. Notes in child decks are included,
-// matching Anki's deck search semantics.
-func (c *Client) ListNotes(ctx context.Context, deck string) ([]Note, error) {
-	if strings.TrimSpace(deck) == "" {
-		return nil, errors.New("list notes: deck name is required")
+// ListNoteTemplates returns all note type (model) names in the collection.
+func (c *Client) ListNoteTemplates(ctx context.Context) ([]string, error) {
+	var templates []string
+	if err := c.invoke(ctx, "modelNames", nil, &templates); err != nil {
+		return nil, fmt.Errorf("list note templates: %w", err)
 	}
+	return templates, nil
+}
 
-	query := `deck:"` + escapeSearchValue(deck) + `"`
+// ListTemplateFields returns the ordered field names for a note type.
+func (c *Client) ListTemplateFields(ctx context.Context, template string) ([]string, error) {
+	if strings.TrimSpace(template) == "" {
+		return nil, errors.New("list template fields: note template is required")
+	}
+	var fields []string
+	if err := c.invoke(ctx, "modelFieldNames", struct {
+		ModelName string `json:"modelName"`
+	}{ModelName: template}, &fields); err != nil {
+		return nil, fmt.Errorf("list template fields: %w", err)
+	}
+	return fields, nil
+}
+
+// ListNotes returns all notes in deck. Notes in child decks are included,
+// matching Anki's deck search semantics. An empty deck returns all notes.
+func (c *Client) ListNotes(ctx context.Context, deck string) ([]Note, error) {
+	query := ""
+	if strings.TrimSpace(deck) != "" {
+		query = `deck:"` + escapeSearchValue(deck) + `"`
+	}
 	var ids []int64
 	if err := c.invoke(ctx, "findNotes", struct {
 		Query string `json:"query"`

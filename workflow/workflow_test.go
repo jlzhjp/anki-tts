@@ -179,8 +179,10 @@ type fakeAnki struct {
 	updateErr     error
 }
 
-func (*fakeAnki) ListDecks(context.Context) ([]string, error)            { return nil, nil }
-func (*fakeAnki) ListNotes(context.Context, string) ([]anki.Note, error) { return nil, nil }
+func (*fakeAnki) ListDecks(context.Context) ([]string, error)                  { return nil, nil }
+func (*fakeAnki) ListNotes(context.Context, string) ([]anki.Note, error)       { return nil, nil }
+func (*fakeAnki) ListNoteTemplates(context.Context) ([]string, error)          { return nil, nil }
+func (*fakeAnki) ListTemplateFields(context.Context, string) ([]string, error) { return nil, nil }
 func (f *fakeAnki) StoreMediaFile(_ context.Context, filename string, data []byte) (string, error) {
 	f.storeCalls++
 	f.mediaFilename = filename

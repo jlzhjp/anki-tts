@@ -22,9 +22,19 @@ import (
 type Workflow interface {
 	ListDecks(context.Context) ([]string, error)
 	ListNotes(context.Context, string) ([]anki.Note, error)
+	SelectNotes(context.Context, workflow.NoteSelector) ([]anki.Note, error)
 	Services() []tts.NamedService
 	TransformsAudio() bool
 	Generate(context.Context, workflow.GenerateRequest) (workflow.GenerateResult, error)
+}
+
+// Options constrains the interactive workflow and preselects generation values.
+type Options struct {
+	Selector  workflow.NoteSelector
+	FromField string
+	ToField   string
+	Service   string
+	Yes       bool
 }
 
 type screenKind uint8
@@ -47,6 +57,7 @@ type Model struct {
 	width    int
 	height   int
 	status   string
+	options  Options
 
 	deck              string
 	note              anki.Note
@@ -59,15 +70,25 @@ type Model struct {
 
 // New creates a TUI model around an injected workflow.
 func New(ctx context.Context, appWorkflow Workflow) Model {
+	return NewWithOptions(ctx, appWorkflow, Options{})
+}
+
+// NewWithOptions creates a TUI model with CLI-provided constraints.
+func NewWithOptions(ctx context.Context, appWorkflow Workflow, options Options) Model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	m := Model{ctx: ctx, workflow: appWorkflow, width: 80, height: 24}
+	m := Model{ctx: ctx, workflow: appWorkflow, options: options, width: 80, height: 24}
 	if appWorkflow == nil {
 		m.failure = newErrorModel(errors.New("TUI workflow is not configured"), nil)
 		return m
 	}
-	m.screens = []screenModel{newDeckModel(ctx, appWorkflow)}
+	if len(options.Selector.Decks) == 1 {
+		m.deck = options.Selector.Decks[0]
+		m.screens = []screenModel{newNoteModel(ctx, appWorkflow, m.deck, options)}
+	} else {
+		m.screens = []screenModel{newDeckModel(ctx, appWorkflow, options.Selector.Decks)}
+	}
 	m.resizeScreens()
 	if len(appWorkflow.Services()) == 0 {
 		m.failure = newErrorModel(errors.New("no TTS services are configured; add an [openrouter] table to config.toml"), nil)
@@ -110,10 +131,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case deckSelectedMsg:
 		m.deck = msg.deck
 		m.clearAfter(deckScreen)
-		return m.push(newNoteModel(m.ctx, m.workflow, msg.deck))
+		return m.push(newNoteModel(m.ctx, m.workflow, msg.deck, m.options))
 	case noteSelectedMsg:
 		m.note = msg.note
 		m.clearAfter(noteScreen)
+		if m.options.FromField != "" {
+			m.sourceField = m.options.FromField
+			return m.afterSourceSelected()
+		}
 		fields := fieldItems(msg.note, true)
 		if len(fields) == 0 {
 			m.failure = newErrorModel(errors.New("this note has no non-empty source fields"), nil)
@@ -123,11 +148,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case sourceSelectedMsg:
 		m.sourceField = msg.field
 		m.clearAfter(sourceScreen)
-		return m.push(newFieldModel(destinationScreen, "Select the destination field", fieldItems(m.note, false)))
+		return m.afterSourceSelected()
 	case destinationSelectedMsg:
 		m.destinationField = msg.field
 		m.clearAfter(destinationScreen)
-		return m.push(newActionModel())
+		return m.afterDestinationSelected()
 	case actionSelectedMsg:
 		if msg.action == cancelAction {
 			m.destinationAction = ""
@@ -135,18 +160,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.pop()
 		}
 		m.destinationAction = msg.action
-		if msg.action == appendAction {
-			m.destinationMode = workflow.AppendDestination
-		} else {
-			m.destinationMode = workflow.ReplaceDestination
-		}
+		m.destinationMode = workflow.ReplaceDestination
 		m.clearAfter(actionScreen)
-		services := m.workflow.Services()
-		if len(services) == 0 {
-			m.failure = newErrorModel(errors.New("no TTS services are configured"), nil)
-			return m, nil
-		}
-		return m.push(newServiceModel(services))
+		return m.afterOverwriteConfirmed()
 	case serviceSelectedMsg:
 		m.service = msg.service
 		request := m.generateRequest(msg.service)
@@ -326,6 +342,46 @@ func (m Model) generateRequest(service tts.NamedService) workflow.GenerateReques
 	}
 }
 
+func (m Model) afterSourceSelected() (tea.Model, tea.Cmd) {
+	if m.options.ToField != "" {
+		m.destinationField = m.options.ToField
+		return m.afterDestinationSelected()
+	}
+	return m.push(newFieldModel(destinationScreen, "Select the destination field", fieldItems(m.note, false)))
+}
+
+func (m Model) afterDestinationSelected() (tea.Model, tea.Cmd) {
+	m.destinationMode = workflow.ReplaceDestination
+	field, ok := m.note.Fields[m.destinationField]
+	if !ok {
+		m.failure = newErrorModel(fmt.Errorf("note %d has no field %q", m.note.ID, m.destinationField), nil)
+		return m, nil
+	}
+	if strings.TrimSpace(field.Value) != "" && !m.options.Yes {
+		return m.push(newActionModel())
+	}
+	return m.afterOverwriteConfirmed()
+}
+
+func (m Model) afterOverwriteConfirmed() (tea.Model, tea.Cmd) {
+	services := m.workflow.Services()
+	if m.options.Service != "" {
+		for _, service := range services {
+			if service.Name == m.options.Service {
+				m.service = service
+				return m, m.generateCmd(m.generateRequest(service))
+			}
+		}
+		m.failure = newErrorModel(fmt.Errorf("TTS service %q is not configured", m.options.Service), nil)
+		return m, nil
+	}
+	if len(services) == 0 {
+		m.failure = newErrorModel(errors.New("no TTS services are configured"), nil)
+		return m, nil
+	}
+	return m.push(newServiceModel(services))
+}
+
 func (m Model) generateCmd(request workflow.GenerateRequest) tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.workflow.Generate(m.ctx, request)
@@ -334,11 +390,18 @@ func (m Model) generateCmd(request workflow.GenerateRequest) tea.Cmd {
 }
 
 func (m Model) returnToNotesAndRefresh() (tea.Model, tea.Cmd) {
-	if len(m.screens) < 2 {
+	noteIndex := -1
+	for index, screen := range m.screens {
+		if screen.kind() == noteScreen {
+			noteIndex = index
+			break
+		}
+	}
+	if noteIndex < 0 {
 		return m, nil
 	}
-	m.screens = m.screens[:2]
-	notes := m.screens[1].(*noteModel)
+	m.screens = m.screens[:noteIndex+1]
+	notes := m.screens[noteIndex].(*noteModel)
 	cmd := notes.refresh(m.status, m.note.ID)
 	m.status = ""
 	m.note = anki.Note{}
@@ -419,10 +482,11 @@ type deckModel struct {
 	selectionModel
 	ctx      context.Context
 	workflow Workflow
+	decks    []string
 }
 
-func newDeckModel(ctx context.Context, appWorkflow Workflow) *deckModel {
-	m := &deckModel{selectionModel: newSelectionModel(deckScreen, "Anki TTS — loading decks", nil), ctx: ctx, workflow: appWorkflow}
+func newDeckModel(ctx context.Context, appWorkflow Workflow, decks []string) *deckModel {
+	m := &deckModel{selectionModel: newSelectionModel(deckScreen, "Anki TTS — loading decks", nil), ctx: ctx, workflow: appWorkflow, decks: decks}
 	m.busy = true
 	return m
 }
@@ -450,6 +514,9 @@ func (m *deckModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *deckModel) loadCmd() tea.Cmd {
 	return func() tea.Msg {
+		if len(m.decks) > 0 {
+			return decksLoadedMsg{decks: m.decks}
+		}
 		decks, err := m.workflow.ListDecks(m.ctx)
 		return decksLoadedMsg{decks: decks, err: err}
 	}
@@ -468,10 +535,11 @@ type noteModel struct {
 	deck            string
 	status          string
 	preferredNoteID int64
+	options         Options
 }
 
-func newNoteModel(ctx context.Context, appWorkflow Workflow, deck string) *noteModel {
-	m := &noteModel{selectionModel: newSelectionModel(noteScreen, "Loading notes — "+deck, nil), ctx: ctx, workflow: appWorkflow, deck: deck}
+func newNoteModel(ctx context.Context, appWorkflow Workflow, deck string, options Options) *noteModel {
+	m := &noteModel{selectionModel: newSelectionModel(noteScreen, "Loading notes — "+deck, nil), ctx: ctx, workflow: appWorkflow, deck: deck, options: options}
 	m.busy = true
 	return m
 }
@@ -486,7 +554,7 @@ func (m *noteModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, failCmd(msg.err, m.loadCmd())
 		}
-		setItemsCmd := m.setItems("Select a note — "+m.deck, noteItems(msg.notes), m.preferredNoteID == 0)
+		setItemsCmd := m.setItems("Select a note — "+m.deck, noteItems(msg.notes, m.options), m.preferredNoteID == 0)
 		if m.preferredNoteID != 0 {
 			for index, note := range msg.notes {
 				if note.ID == m.preferredNoteID {
@@ -505,7 +573,11 @@ func (m *noteModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.String() == "enter" && !m.busy && !m.filtering() {
 			if selected, ok := m.selected(); ok {
-				return m, messageCmd(noteSelectedMsg{note: selected.value.(anki.Note)})
+				candidate := selected.value.(noteCandidate)
+				if candidate.invalid != "" {
+					return m, m.list.NewStatusMessage(candidate.invalid)
+				}
+				return m, messageCmd(noteSelectedMsg{note: candidate.note})
 			}
 		}
 	}
@@ -514,7 +586,9 @@ func (m *noteModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *noteModel) loadCmd() tea.Cmd {
 	return func() tea.Msg {
-		notes, err := m.workflow.ListNotes(m.ctx, m.deck)
+		selector := m.options.Selector
+		selector.Decks = []string{m.deck}
+		notes, err := m.workflow.SelectNotes(m.ctx, selector)
 		return notesLoadedMsg{notes: notes, err: err}
 	}
 }
@@ -553,7 +627,7 @@ func (m *fieldModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 type actionModel struct{ selectionModel }
 
 func newActionModel() *actionModel {
-	return &actionModel{selectionModel: newSelectionModel(actionScreen, "Destination field behavior", actionItems())}
+	return &actionModel{selectionModel: newSelectionModel(actionScreen, "Destination is not empty — replace it?", actionItems())}
 }
 
 func (m *actionModel) Init() tea.Cmd { return nil }
@@ -633,9 +707,13 @@ type destinationAction string
 
 const (
 	overrideAction destinationAction = "Override"
-	appendAction   destinationAction = "Append"
 	cancelAction   destinationAction = "Cancel"
 )
+
+type noteCandidate struct {
+	note    anki.Note
+	invalid string
+}
 
 type item struct {
 	title       string
@@ -657,14 +735,35 @@ func deckItems(decks []string) []list.Item {
 	return items
 }
 
-func noteItems(notes []anki.Note) []list.Item {
+func noteItems(notes []anki.Note, options Options) []list.Item {
 	items := make([]list.Item, 0, len(notes))
 	for _, note := range notes {
 		title := firstFieldValue(note)
 		if title == "" {
 			title = "(empty note)"
 		}
-		items = append(items, item{title: title, description: fmt.Sprintf("%s · note %d", note.ModelName, note.ID), value: note})
+		candidate := noteCandidate{note: note}
+		if options.FromField != "" {
+			field, ok := note.Fields[options.FromField]
+			if !ok {
+				candidate.invalid = fmt.Sprintf("note %d is missing source field %q", note.ID, options.FromField)
+			} else {
+				text, _ := textutil.FromHTML(field.Value)
+				if strings.TrimSpace(text) == "" {
+					candidate.invalid = fmt.Sprintf("note %d has an empty source field %q", note.ID, options.FromField)
+				}
+			}
+		}
+		if candidate.invalid == "" && options.ToField != "" {
+			if _, ok := note.Fields[options.ToField]; !ok {
+				candidate.invalid = fmt.Sprintf("note %d is missing destination field %q", note.ID, options.ToField)
+			}
+		}
+		description := fmt.Sprintf("%s · note %d", note.ModelName, note.ID)
+		if candidate.invalid != "" {
+			description += " · DISABLED: " + candidate.invalid
+		}
+		items = append(items, item{title: title, description: description, value: candidate})
 	}
 	return items
 }
@@ -697,8 +796,7 @@ func fieldItems(note anki.Note, nonEmpty bool) []list.Item {
 
 func actionItems() []list.Item {
 	return []list.Item{
-		item{title: string(overrideAction), description: "Replace the destination field", value: overrideAction},
-		item{title: string(appendAction), description: "Keep existing content and append audio", value: appendAction},
+		item{title: string(overrideAction), description: "Replace the non-empty destination field", value: overrideAction},
 		item{title: string(cancelAction), description: "Return without generating audio", value: cancelAction},
 	}
 }

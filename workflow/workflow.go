@@ -20,6 +20,8 @@ const maxFinalAudioSize = 32 << 20 // 32 MiB
 // AnkiClient contains the Anki operations used by the workflow.
 type AnkiClient interface {
 	ListDecks(context.Context) ([]string, error)
+	ListNoteTemplates(context.Context) ([]string, error)
+	ListTemplateFields(context.Context, string) ([]string, error)
 	ListNotes(context.Context, string) ([]anki.Note, error)
 	StoreMediaFile(context.Context, string, []byte) (string, error)
 	UpdateNote(context.Context, anki.NoteUpdate) error
@@ -66,6 +68,14 @@ func New(client AnkiClient, services *tts.Container, transformer tts.Transformer
 
 func (s *Service) ListDecks(ctx context.Context) ([]string, error) {
 	return s.anki.ListDecks(ctx)
+}
+
+func (s *Service) ListNoteTemplates(ctx context.Context) ([]string, error) {
+	return s.anki.ListNoteTemplates(ctx)
+}
+
+func (s *Service) ListTemplateFields(ctx context.Context, template string) ([]string, error) {
+	return s.anki.ListTemplateFields(ctx, template)
 }
 
 func (s *Service) ListNotes(ctx context.Context, deck string) ([]anki.Note, error) {

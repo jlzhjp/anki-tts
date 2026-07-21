@@ -24,13 +24,22 @@
             version = "0.1.0";
 
             src = ./.;
-            vendorHash = "sha256-L4gx0oVmQDFDqKVlmo8brsZLTVssT/83w1iDEHOWCwY=";
+            vendorHash = "sha256-iW3EILAKfALa3Hv2bntGqbVRcRmiLJ2aFrV4bJhWz24=";
 
-            nativeBuildInputs = [ pkgs.makeWrapper ];
+            nativeBuildInputs = [
+              pkgs.installShellFiles
+              pkgs.makeWrapper
+            ];
 
             postInstall = ''
               wrapProgram $out/bin/anki-tts \
                 --prefix PATH : ${nixpkgs.lib.makeBinPath [ pkgs.ffmpeg ]}
+            ''
+            + nixpkgs.lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
+              installShellCompletion --cmd anki-tts \
+                --bash <($out/bin/anki-tts completion bash) \
+                --fish <($out/bin/anki-tts completion fish) \
+                --zsh <($out/bin/anki-tts completion zsh)
             '';
 
             meta = {

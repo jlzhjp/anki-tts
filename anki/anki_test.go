@@ -28,6 +28,32 @@ func TestListDecks(t *testing.T) {
 	}
 }
 
+func TestListNoteTemplateMetadata(t *testing.T) {
+	client := NewClient(WithHTTPClient(doerFunc(func(req *http.Request) (*http.Response, error) {
+		var got request
+		if err := json.NewDecoder(req.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		switch got.Action {
+		case "modelNames":
+			return jsonResponse(`{"result":["Basic"],"error":null}`), nil
+		case "modelFieldNames":
+			return jsonResponse(`{"result":["Front","Back"],"error":null}`), nil
+		default:
+			t.Fatalf("unexpected action %q", got.Action)
+			return nil, nil
+		}
+	})))
+	templates, err := client.ListNoteTemplates(context.Background())
+	if err != nil || !reflect.DeepEqual(templates, []string{"Basic"}) {
+		t.Fatalf("templates=%v error=%v", templates, err)
+	}
+	fields, err := client.ListTemplateFields(context.Background(), "Basic")
+	if err != nil || !reflect.DeepEqual(fields, []string{"Front", "Back"}) {
+		t.Fatalf("fields=%v error=%v", fields, err)
+	}
+}
+
 func TestListNotes(t *testing.T) {
 	call := 0
 	client := testClient(t, func(t *testing.T, got request) any {
