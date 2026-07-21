@@ -216,7 +216,7 @@ func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byt
 	if err != nil {
 		return "", fmt.Errorf("store media file %q: encode filename: %w", filename, err)
 	}
-	prefix := []byte(fmt.Sprintf(`{"action":"storeMediaFile","version":%d,"params":{"filename":%s,"data":"`, apiVersion, encodedFilename))
+	prefix := fmt.Appendf(nil, `{"action":"storeMediaFile","version":%d,"params":{"filename":%s,"data":"`, apiVersion, encodedFilename)
 	suffix := []byte(`"}}`)
 	contentLength := int64(len(prefix) + base64.StdEncoding.EncodedLen(len(data)) + len(suffix))
 
