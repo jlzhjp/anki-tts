@@ -11,12 +11,6 @@ import (
 	"sync"
 )
 
-// ServiceFactory creates a text-to-speech service from provider configuration.
-// The configuration is expected to be a TOML table unmarshaled into a map.
-type ServiceFactory interface {
-	Create(config map[string]any) (Service, error)
-}
-
 // Service generates speech from text. Implementations must support concurrent
 // Generate calls from the workflow synthesis stage.
 type Service interface {

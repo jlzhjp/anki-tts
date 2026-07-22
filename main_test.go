@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"jlzhjp.dev/anki-tts/ffmpeg"
+	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/anki-tts/workflow"
 )
 
 func TestLoadConfigAndBuildServices(t *testing.T) {
@@ -115,8 +117,50 @@ func TestLoadFFmpegConfigRejectsNonStringArgument(t *testing.T) {
 	}
 }
 
+func TestLoadExecutionConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := `[openrouter]
+model = "openai/tts"
+concurrency = 7
+[openrouter.retry]
+max_attempts = 4
+initial_backoff = "250ms"
+max_backoff = "3s"
+[ffmpeg]
+format = "mp3"
+concurrency = 3
+[anki]
+concurrency = 5
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline := pipelineConfig(cfg)
+	if pipeline.Synthesis.Concurrency != 7 || pipeline.Synthesis.Retry.MaxAttempts != 4 || pipeline.Synthesis.Retry.InitialBackoff != 250*time.Millisecond || pipeline.Synthesis.Retry.MaxBackoff != 3*time.Second {
+		t.Fatalf("synthesis config = %+v", pipeline.Synthesis)
+	}
+	if pipeline.Audio.Concurrency != 3 || pipeline.Persistence.Concurrency != 5 {
+		t.Fatalf("pipeline config = %+v", pipeline)
+	}
+}
+
+func TestPipelineConfigUsesDefaultsAndRejectsInvalidValues(t *testing.T) {
+	defaults := pipelineConfig(config{})
+	if defaults.Synthesis.Concurrency != 4 || defaults.Audio.Concurrency != 2 || defaults.Persistence.Concurrency != 4 {
+		t.Fatalf("defaults = %+v", defaults)
+	}
+	defaults.Persistence.Concurrency = -1
+	if _, err := workflow.NewWithConfig(anki.NewClient(), nil, nil, defaults); err == nil || !strings.Contains(err.Error(), "persistence concurrency") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func configFromFFmpeg(format string) config {
 	cfg := config{}
-	cfg.FFmpeg = &ffmpeg.Config{Format: format}
+	cfg.FFmpeg = &ffmpegConfig{Format: format}
 	return cfg
 }

@@ -25,18 +25,16 @@ type Workflow interface {
 	Services() []tts.NamedService
 	TransformsAudio() bool
 	Plan(workflow.GenerationSpec) (workflow.Plan, error)
-	Execute(context.Context, workflow.Plan, workflow.PipelineOptions) (workflow.BatchResult, error)
+	Execute(context.Context, workflow.Plan, workflow.ExecuteOptions) (workflow.BatchResult, error)
 }
 
 // Options constrains the interactive workflow and preselects generation values.
 type Options struct {
-	Selector             workflow.NoteSelector
-	FromField            string
-	ToField              string
-	Service              string
-	Yes                  bool
-	SynthesisConcurrency int
-	AudioConcurrency     int
+	Selector  workflow.NoteSelector
+	FromField string
+	ToField   string
+	Service   string
+	Yes       bool
 }
 
 type screenKind uint8
@@ -377,18 +375,7 @@ func (m Model) generateCmd(request workflow.GenerationSpec) tea.Cmd {
 		if err != nil {
 			return generatedMsg{request: request, err: err}
 		}
-		synthesisConcurrency := m.options.SynthesisConcurrency
-		if synthesisConcurrency <= 0 {
-			synthesisConcurrency = workflow.DefaultSynthesisConcurrency
-		}
-		audioConcurrency := m.options.AudioConcurrency
-		if audioConcurrency <= 0 {
-			audioConcurrency = workflow.DefaultAudioConcurrency
-		}
-		batch, err := m.workflow.Execute(m.ctx, plan, workflow.PipelineOptions{
-			SynthesisConcurrency: synthesisConcurrency,
-			AudioConcurrency:     audioConcurrency,
-		})
+		batch, err := m.workflow.Execute(m.ctx, plan, workflow.ExecuteOptions{})
 		if err != nil {
 			return generatedMsg{request: request, err: err}
 		}

@@ -44,6 +44,14 @@ type Factory struct {
 	httpClient     HTTPClient
 }
 
+// Config describes an OpenRouter text-to-speech service.
+type Config struct {
+	Model          string `toml:"model"`
+	APIKey         string `toml:"api_key"`
+	Voice          string `toml:"voice"`
+	ResponseFormat string `toml:"response_format"`
+}
+
 // Option configures a Factory.
 type Option func(*Factory)
 
@@ -88,17 +96,13 @@ func NewFactory(options ...Option) *Factory {
 }
 
 // Create validates config and creates an OpenRouter text-to-speech service.
-// Supported keys are model, api_key, voice, and response_format.
-func (f *Factory) Create(config map[string]any) (tts.Service, error) {
-	model, err := requiredString(config, "model")
-	if err != nil {
-		return nil, fmt.Errorf("create OpenRouter TTS service: %w", err)
+func (f *Factory) Create(config Config) (tts.Service, error) {
+	model := strings.TrimSpace(config.Model)
+	if model == "" {
+		return nil, errors.New("create OpenRouter TTS service: model is required")
 	}
 
-	apiKey, err := optionalString(config, "api_key", "")
-	if err != nil {
-		return nil, fmt.Errorf("create OpenRouter TTS service: %w", err)
-	}
+	apiKey := strings.TrimSpace(config.APIKey)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(os.Getenv(apiKeyEnvironment))
 	}
@@ -106,13 +110,13 @@ func (f *Factory) Create(config map[string]any) (tts.Service, error) {
 		return nil, fmt.Errorf("create OpenRouter TTS service: api_key is required (or set %s)", apiKeyEnvironment)
 	}
 
-	voice, err := optionalString(config, "voice", defaultVoice)
-	if err != nil {
-		return nil, fmt.Errorf("create OpenRouter TTS service: %w", err)
+	voice := strings.TrimSpace(config.Voice)
+	if voice == "" {
+		voice = defaultVoice
 	}
-	format, err := optionalString(config, "response_format", defaultFormat)
-	if err != nil {
-		return nil, fmt.Errorf("create OpenRouter TTS service: %w", err)
+	format := strings.TrimSpace(config.ResponseFormat)
+	if format == "" {
+		format = defaultFormat
 	}
 	if format != "mp3" && format != "pcm" {
 		return nil, fmt.Errorf("create OpenRouter TTS service: response_format must be mp3 or pcm, got %q", format)
@@ -325,38 +329,6 @@ func openRouterAPIError(operation string, resp *http.Response, apiKey string) er
 	return fmt.Errorf("%s: HTTP %s", operation, resp.Status)
 }
 
-func requiredString(config map[string]any, key string) (string, error) {
-	value, ok := config[key]
-	if !ok {
-		return "", fmt.Errorf("%s is required", key)
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("%s must be a string", key)
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", fmt.Errorf("%s is required", key)
-	}
-	return text, nil
-}
-
-func optionalString(config map[string]any, key, fallback string) (string, error) {
-	value, ok := config[key]
-	if !ok {
-		return fallback, nil
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("%s must be a string", key)
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return fallback, nil
-	}
-	return text, nil
-}
-
 func mediaTypeForFormat(format string) string {
 	if format == "pcm" {
 		return "audio/pcm"
@@ -364,7 +336,4 @@ func mediaTypeForFormat(format string) string {
 	return "audio/mpeg"
 }
 
-var (
-	_ tts.ServiceFactory = (*Factory)(nil)
-	_ tts.Service        = (*service)(nil)
-)
+var _ tts.Service = (*service)(nil)

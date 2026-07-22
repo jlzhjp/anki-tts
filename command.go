@@ -13,17 +13,15 @@ import (
 )
 
 type commandOptions struct {
-	decks                []string
-	noteTemplates        []string
-	fieldMatches         []string
-	fromField            string
-	toField              string
-	service              string
-	limit                int
-	interactive          bool
-	yes                  bool
-	synthesisConcurrency int
-	audioConcurrency     int
+	decks         []string
+	noteTemplates []string
+	fieldMatches  []string
+	fromField     string
+	toField       string
+	service       string
+	limit         int
+	interactive   bool
+	yes           bool
 }
 
 func newRootCommand(input io.Reader, output, errorOutput io.Writer) *cobra.Command {
@@ -45,12 +43,6 @@ field matchers must match. With no selectors, batch mode considers every note.`,
 			if cmd.Flags().Changed("limit") && options.limit <= 0 {
 				return errors.New("--limit must be greater than zero")
 			}
-			if options.synthesisConcurrency <= 0 {
-				return errors.New("--synthesis-concurrency must be greater than zero")
-			}
-			if options.audioConcurrency <= 0 {
-				return errors.New("--audio-concurrency must be greater than zero")
-			}
 			selector, err := options.selector()
 			if err != nil {
 				return err
@@ -63,8 +55,6 @@ field matchers must match. With no selectors, batch mode considers every note.`,
 				return runTUI(cmd.Context(), appWorkflow, tui.Options{
 					Selector: selector, FromField: options.fromField, ToField: options.toField,
 					Service: options.service, Yes: options.yes,
-					SynthesisConcurrency: options.synthesisConcurrency,
-					AudioConcurrency:     options.audioConcurrency,
 				}, input, output)
 			}
 			return runBatch(cmd.Context(), appWorkflow, selector, options, input, output)
@@ -84,8 +74,6 @@ field matchers must match. With no selectors, batch mode considers every note.`,
 	flags.IntVar(&options.limit, "limit", 0, "maximum number of matching notes")
 	flags.BoolVar(&options.interactive, "interactive", false, "select and generate notes interactively")
 	flags.BoolVar(&options.yes, "yes", false, "accept confirmation prompts")
-	flags.IntVar(&options.synthesisConcurrency, "synthesis-concurrency", workflow.DefaultSynthesisConcurrency, "concurrent TTS synthesis workers")
-	flags.IntVar(&options.audioConcurrency, "audio-concurrency", workflow.DefaultAudioConcurrency, "concurrent audio processing workers")
 
 	registerCompletions(cmd, &options)
 	cmd.AddCommand(newCompletionCommand())

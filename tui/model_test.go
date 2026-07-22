@@ -215,7 +215,7 @@ func (f *fakeWorkflow) Plan(request workflow.GenerationSpec) (workflow.Plan, err
 	f.request = request
 	return workflow.Plan{}, nil
 }
-func (f *fakeWorkflow) Execute(_ context.Context, _ workflow.Plan, _ workflow.PipelineOptions) (workflow.BatchResult, error) {
+func (f *fakeWorkflow) Execute(_ context.Context, _ workflow.Plan, _ workflow.ExecuteOptions) (workflow.BatchResult, error) {
 	call := f.generateCalls
 	f.generateCalls++
 	if call < len(f.errs) && f.errs[call] != nil {

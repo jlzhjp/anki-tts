@@ -23,8 +23,30 @@ import (
 const configFileName = "config.toml"
 
 type config struct {
-	OpenRouter map[string]any `toml:"openrouter"`
-	FFmpeg     *ffmpeg.Config `toml:"ffmpeg"`
+	OpenRouter *openRouterConfig `toml:"openrouter"`
+	FFmpeg     *ffmpegConfig     `toml:"ffmpeg"`
+	Anki       stageConfig       `toml:"anki"`
+}
+
+type stageConfig struct {
+	Concurrency int                  `toml:"concurrency"`
+	Retry       workflow.RetryConfig `toml:"retry"`
+}
+
+type openRouterConfig struct {
+	Model          string               `toml:"model"`
+	APIKey         string               `toml:"api_key"`
+	Voice          string               `toml:"voice"`
+	ResponseFormat string               `toml:"response_format"`
+	Concurrency    int                  `toml:"concurrency"`
+	Retry          workflow.RetryConfig `toml:"retry"`
+}
+
+type ffmpegConfig struct {
+	Format      string               `toml:"format"`
+	Args        []string             `toml:"args"`
+	Concurrency int                  `toml:"concurrency"`
+	Retry       workflow.RetryConfig `toml:"retry"`
 }
 
 func main() {
@@ -54,7 +76,8 @@ func buildWorkflow() (*workflow.Service, error) {
 		return nil, err
 	}
 
-	return workflow.New(anki.NewClient(), services, transformer), nil
+	pipeline := pipelineConfig(cfg)
+	return workflow.NewWithConfig(anki.NewClient(), services, transformer, pipeline)
 }
 
 func runTUI(ctx context.Context, appWorkflow *workflow.Service, options tui.Options, input io.Reader, output io.Writer) error {
@@ -70,7 +93,7 @@ func buildTransformer(cfg config) (tts.Transformer, error) {
 	if cfg.FFmpeg == nil {
 		return nil, nil
 	}
-	return ffmpeg.New(*cfg.FFmpeg)
+	return ffmpeg.New(ffmpeg.Config{Format: cfg.FFmpeg.Format, Args: cfg.FFmpeg.Args})
 }
 
 func loadConfig(path string) (config, error) {
@@ -86,7 +109,10 @@ func buildServices(cfg config) (*tts.Container, error) {
 	if cfg.OpenRouter == nil {
 		return container, nil
 	}
-	service, err := openrouter.NewFactory().Create(cfg.OpenRouter)
+	service, err := openrouter.NewFactory().Create(openrouter.Config{
+		Model: cfg.OpenRouter.Model, APIKey: cfg.OpenRouter.APIKey, Voice: cfg.OpenRouter.Voice,
+		ResponseFormat: cfg.OpenRouter.ResponseFormat,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -94,4 +120,36 @@ func buildServices(cfg config) (*tts.Container, error) {
 		return nil, err
 	}
 	return container, nil
+}
+
+func pipelineConfig(cfg config) workflow.PipelineConfig {
+	defaults := workflow.DefaultPipelineConfig()
+	if cfg.OpenRouter != nil {
+		defaults.Synthesis = mergeStageConfig(defaults.Synthesis, stageConfig{
+			Concurrency: cfg.OpenRouter.Concurrency, Retry: cfg.OpenRouter.Retry,
+		})
+	}
+	if cfg.FFmpeg != nil {
+		defaults.Audio = mergeStageConfig(defaults.Audio, stageConfig{
+			Concurrency: cfg.FFmpeg.Concurrency, Retry: cfg.FFmpeg.Retry,
+		})
+	}
+	defaults.Persistence = mergeStageConfig(defaults.Persistence, cfg.Anki)
+	return defaults
+}
+
+func mergeStageConfig(defaults workflow.StageConfig, configured stageConfig) workflow.StageConfig {
+	if configured.Concurrency != 0 {
+		defaults.Concurrency = configured.Concurrency
+	}
+	if configured.Retry.MaxAttempts != 0 {
+		defaults.Retry.MaxAttempts = configured.Retry.MaxAttempts
+	}
+	if configured.Retry.InitialBackoff != 0 {
+		defaults.Retry.InitialBackoff = configured.Retry.InitialBackoff
+	}
+	if configured.Retry.MaxBackoff != 0 {
+		defaults.Retry.MaxBackoff = configured.Retry.MaxBackoff
+	}
+	return defaults
 }

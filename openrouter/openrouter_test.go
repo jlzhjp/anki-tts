@@ -32,7 +32,7 @@ func TestFactoryCreateDefaultsAndEnvironmentKey(t *testing.T) {
 		return response(http.StatusOK, "audio/mpeg", []byte("audio")), nil
 	})))
 
-	service, err := factory.Create(map[string]any{"model": "openai/tts"})
+	service, err := factory.Create(Config{Model: "openai/tts"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestFactoryCreateDefaultsAndEnvironmentKey(t *testing.T) {
 	}
 }
 
-func TestFactoryMapKeyTakesPrecedence(t *testing.T) {
+func TestFactoryConfigKeyTakesPrecedence(t *testing.T) {
 	t.Setenv(apiKeyEnvironment, "environment-key")
 	factory := NewFactory(WithHTTPClient(doerFunc(func(req *http.Request) (*http.Response, error) {
 		if got := req.Header.Get("Authorization"); got != "Bearer map-key" {
@@ -55,11 +55,8 @@ func TestFactoryMapKeyTakesPrecedence(t *testing.T) {
 		return response(http.StatusOK, "", []byte("pcm")), nil
 	})))
 
-	service, err := factory.Create(map[string]any{
-		"model":           "openai/tts",
-		"api_key":         "map-key",
-		"voice":           "nova",
-		"response_format": "pcm",
+	service, err := factory.Create(Config{
+		Model: "openai/tts", APIKey: "map-key", Voice: "nova", ResponseFormat: "pcm",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -78,16 +75,12 @@ func TestFactoryConfigurationErrors(t *testing.T) {
 	t.Setenv(apiKeyEnvironment, "")
 	tests := []struct {
 		name   string
-		config map[string]any
+		config Config
 		want   string
 	}{
-		{name: "missing model", config: map[string]any{"api_key": "key"}, want: "model is required"},
-		{name: "model type", config: map[string]any{"model": 42, "api_key": "key"}, want: "model must be a string"},
-		{name: "missing key", config: map[string]any{"model": "model"}, want: "api_key is required"},
-		{name: "key type", config: map[string]any{"model": "model", "api_key": true}, want: "api_key must be a string"},
-		{name: "voice type", config: map[string]any{"model": "model", "api_key": "key", "voice": 1}, want: "voice must be a string"},
-		{name: "format type", config: map[string]any{"model": "model", "api_key": "key", "response_format": 1}, want: "response_format must be a string"},
-		{name: "unsupported format", config: map[string]any{"model": "model", "api_key": "key", "response_format": "wav"}, want: "response_format must be mp3 or pcm"},
+		{name: "missing model", config: Config{APIKey: "key"}, want: "model is required"},
+		{name: "missing key", config: Config{Model: "model"}, want: "api_key is required"},
+		{name: "unsupported format", config: Config{Model: "model", APIKey: "key", ResponseFormat: "wav"}, want: "response_format must be mp3 or pcm"},
 	}
 
 	for _, test := range tests {
@@ -133,7 +126,7 @@ func TestGenerateRequestAndPricing(t *testing.T) {
 			}
 		})),
 	)
-	service, err := factory.Create(map[string]any{"model": "model", "api_key": "secret"})
+	service, err := factory.Create(Config{Model: "model", APIKey: "secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +187,7 @@ func TestGeneratedAudioStreamEnforcesSizeLimit(t *testing.T) {
 
 func TestGenerateErrors(t *testing.T) {
 	t.Run("empty input", func(t *testing.T) {
-		service, err := NewFactory().Create(map[string]any{"model": "model", "api_key": "key"})
+		service, err := NewFactory().Create(Config{Model: "model", APIKey: "key"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,10 +236,7 @@ func TestGenerateErrors(t *testing.T) {
 
 func mustService(t *testing.T, client HTTPClient) tts.Service {
 	t.Helper()
-	service, err := NewFactory(WithHTTPClient(client)).Create(map[string]any{
-		"model":   "model",
-		"api_key": "secret",
-	})
+	service, err := NewFactory(WithHTTPClient(client)).Create(Config{Model: "model", APIKey: "secret"})
 	if err != nil {
 		t.Fatal(err)
 	}

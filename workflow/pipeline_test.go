@@ -17,7 +17,14 @@ func TestPipelineHonorsStageLimitsAndSerializesPersistence(t *testing.T) {
 	provider := &trackingTTS{delay: 20 * time.Millisecond}
 	transformer := &trackingTransformer{delay: 20 * time.Millisecond}
 	client := &trackingAnki{delay: 5 * time.Millisecond}
-	service := New(client, nil, transformer)
+	config := DefaultPipelineConfig()
+	config.Synthesis.Concurrency = 3
+	config.Audio.Concurrency = 2
+	config.Persistence.Concurrency = 1
+	service, err := NewWithConfig(client, nil, transformer, config)
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := service.Plan(pipelineSpec(provider, 8))
 	if err != nil {
 		t.Fatal(err)
@@ -25,14 +32,14 @@ func TestPipelineHonorsStageLimitsAndSerializesPersistence(t *testing.T) {
 
 	var callbackMu sync.Mutex
 	callbackCount := 0
-	result, err := service.Execute(context.Background(), plan, PipelineOptions{
-		SynthesisConcurrency: 3,
-		AudioConcurrency:     2,
-		OnResult: func(ItemResult) {
-			callbackMu.Lock()
-			callbackCount++
-			callbackMu.Unlock()
-		},
+	result, err := service.Execute(context.Background(), plan, ExecuteOptions{
+		Progress: ProgressReporterFunc(func(event ProgressEvent) {
+			if event.Kind == ProgressCompleted && event.Step == StepUpdateNote {
+				callbackMu.Lock()
+				callbackCount++
+				callbackMu.Unlock()
+			}
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -69,10 +76,7 @@ func TestPipelineCancellationReturnsEveryOutcome(t *testing.T) {
 	var result BatchResult
 	var executeErr error
 	go func() {
-		result, executeErr = service.Execute(ctx, plan, PipelineOptions{
-			SynthesisConcurrency: 2,
-			AudioConcurrency:     2,
-		})
+		result, executeErr = service.Execute(ctx, plan, ExecuteOptions{})
 		close(done)
 	}()
 	<-provider.started
@@ -106,7 +110,7 @@ func TestAudioCancellationClosesOwnedVoiceExactlyOnce(t *testing.T) {
 	done := make(chan struct{})
 	var result BatchResult
 	go func() {
-		result, _ = service.Execute(ctx, plan, PipelineOptions{SynthesisConcurrency: 1, AudioConcurrency: 1})
+		result, _ = service.Execute(ctx, plan, ExecuteOptions{})
 		close(done)
 	}()
 	<-provider.started
@@ -142,11 +146,16 @@ func TestPipelineReportsCompletionLiveButReturnsPlanOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var completionMu sync.Mutex
 	var completionOrder []int64
-	result, err := service.Execute(context.Background(), plan, PipelineOptions{
-		SynthesisConcurrency: 2,
-		AudioConcurrency:     2,
-		OnResult:             func(item ItemResult) { completionOrder = append(completionOrder, item.NoteID) },
+	result, err := service.Execute(context.Background(), plan, ExecuteOptions{
+		Progress: ProgressReporterFunc(func(event ProgressEvent) {
+			if event.Kind == ProgressCompleted && event.Step == StepUpdateNote {
+				completionMu.Lock()
+				completionOrder = append(completionOrder, event.NoteID)
+				completionMu.Unlock()
+			}
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -161,12 +170,17 @@ func TestPipelineReportsCompletionLiveButReturnsPlanOrder(t *testing.T) {
 
 func TestPartialPersistenceErrorIsTyped(t *testing.T) {
 	client := &trackingAnki{updateErr: errors.New("update failed")}
-	service := New(client, nil, nil)
+	config := DefaultPipelineConfig()
+	config.Persistence.Retry.MaxAttempts = 1
+	service, configErr := NewWithConfig(client, nil, nil, config)
+	if configErr != nil {
+		t.Fatal(configErr)
+	}
 	plan, err := service.Plan(pipelineSpec(&trackingTTS{}, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.Execute(context.Background(), plan, PipelineOptions{SynthesisConcurrency: 1, AudioConcurrency: 1})
+	result, err := service.Execute(context.Background(), plan, ExecuteOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +188,102 @@ func TestPartialPersistenceErrorIsTyped(t *testing.T) {
 	if !errors.As(result.Items[0].Err, &partial) || partial.Filename == "" {
 		t.Fatalf("error=%v, want PartialPersistenceError", result.Items[0].Err)
 	}
+}
+
+func TestPipelineRetriesEachReplayableOperation(t *testing.T) {
+	t.Run("synthesis", func(t *testing.T) {
+		provider := &flakyTTS{failures: 2}
+		service, err := NewWithConfig(&trackingAnki{}, nil, nil, fastRetryPipeline())
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := service.Plan(pipelineSpec(provider, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var retries int
+		result, err := service.Execute(context.Background(), plan, ExecuteOptions{Progress: ProgressReporterFunc(func(event ProgressEvent) {
+			if event.Kind == ProgressRetrying && event.Step == StepSynthesize {
+				retries++
+			}
+		})})
+		if err != nil || result.Items[0].Err != nil {
+			t.Fatalf("result=%+v error=%v", result, err)
+		}
+		if provider.calls != 3 || retries != 2 {
+			t.Fatalf("provider calls=%d retries=%d", provider.calls, retries)
+		}
+	})
+
+	t.Run("audio replays synthesized bytes", func(t *testing.T) {
+		provider := &flakyTTS{}
+		transformer := &flakyTransformer{failures: 1}
+		service, err := NewWithConfig(&trackingAnki{}, nil, transformer, fastRetryPipeline())
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := service.Plan(pipelineSpec(provider, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := service.Execute(context.Background(), plan, ExecuteOptions{})
+		if err != nil || result.Items[0].Err != nil {
+			t.Fatalf("result=%+v error=%v", result, err)
+		}
+		if provider.calls != 1 || transformer.calls != 2 {
+			t.Fatalf("provider calls=%d transformer calls=%d", provider.calls, transformer.calls)
+		}
+	})
+
+	t.Run("persistence retries operations independently", func(t *testing.T) {
+		client := &flakyPersistence{storeFailures: 1, updateFailures: 1}
+		service, err := NewWithConfig(client, nil, nil, fastRetryPipeline())
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := service.Plan(pipelineSpec(&flakyTTS{}, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := service.Execute(context.Background(), plan, ExecuteOptions{})
+		if err != nil || result.Items[0].Err != nil {
+			t.Fatalf("result=%+v error=%v", result, err)
+		}
+		if client.storeCalls != 2 || client.updateCalls != 2 {
+			t.Fatalf("store calls=%d update calls=%d", client.storeCalls, client.updateCalls)
+		}
+	})
+}
+
+func TestRetryBackoffStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	retrying := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := retry(ctx, RetryConfig{MaxAttempts: 3, InitialBackoff: time.Hour, MaxBackoff: time.Hour},
+			func(int, time.Time, error) { close(retrying) },
+			func() (struct{}, error) { return struct{}{}, errors.New("temporary") })
+		done <- err
+	}()
+	<-retrying
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("retry backoff ignored cancellation")
+	}
+}
+
+func fastRetryPipeline() PipelineConfig {
+	config := DefaultPipelineConfig()
+	for _, stage := range []*StageConfig{&config.Synthesis, &config.Audio, &config.Persistence} {
+		stage.Concurrency = 1
+		stage.Retry = RetryConfig{MaxAttempts: 3, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
+	}
+	return config
 }
 
 func pipelineSpec(service tts.Service, count int) GenerationSpec {
@@ -319,6 +429,65 @@ func (delayedTTS) Generate(ctx context.Context, input tts.Input) (tts.Voice, err
 		}
 	}
 	return &pipelineVoice{ReadCloser: io.NopCloser(strings.NewReader("audio"))}, nil
+}
+
+type flakyTTS struct {
+	failures int
+	calls    int
+}
+
+func (s *flakyTTS) Generate(context.Context, tts.Input) (tts.Voice, error) {
+	s.calls++
+	if s.calls <= s.failures {
+		return nil, errors.New("temporary synthesis failure")
+	}
+	return &pipelineVoice{ReadCloser: io.NopCloser(strings.NewReader("audio"))}, nil
+}
+
+type flakyTransformer struct {
+	failures int
+	calls    int
+}
+
+func (t *flakyTransformer) Transform(_ context.Context, input tts.Voice) (tts.Voice, error) {
+	t.calls++
+	data, err := io.ReadAll(input)
+	_ = input.Close()
+	if err != nil {
+		return nil, err
+	}
+	if t.calls <= t.failures {
+		return nil, errors.New("temporary audio failure")
+	}
+	return &pipelineVoice{ReadCloser: io.NopCloser(strings.NewReader(string(data)))}, nil
+}
+
+type flakyPersistence struct {
+	storeFailures  int
+	updateFailures int
+	storeCalls     int
+	updateCalls    int
+}
+
+func (*flakyPersistence) ListDecks(context.Context) ([]string, error)         { return nil, nil }
+func (*flakyPersistence) ListNoteTemplates(context.Context) ([]string, error) { return nil, nil }
+func (*flakyPersistence) ListTemplateFields(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (*flakyPersistence) ListNotes(context.Context, string) ([]anki.Note, error) { return nil, nil }
+func (c *flakyPersistence) StoreMediaFile(_ context.Context, filename string, _ []byte) (string, error) {
+	c.storeCalls++
+	if c.storeCalls <= c.storeFailures {
+		return "", errors.New("temporary store failure")
+	}
+	return filename, nil
+}
+func (c *flakyPersistence) UpdateNote(context.Context, anki.NoteUpdate) error {
+	c.updateCalls++
+	if c.updateCalls <= c.updateFailures {
+		return errors.New("temporary update failure")
+	}
+	return nil
 }
 
 type blockingVoiceTTS struct {

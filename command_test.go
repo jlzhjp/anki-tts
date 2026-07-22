@@ -25,7 +25,6 @@ func TestBatchConfirmsOverwriteAndProcessesEveryNote(t *testing.T) {
 	var output bytes.Buffer
 	err := runBatch(context.Background(), appWorkflow, workflow.NoteSelector{}, commandOptions{
 		fromField: "Front", toField: "Audio", service: "Test",
-		synthesisConcurrency: 2, audioConcurrency: 2,
 	}, strings.NewReader("yes\ny\n"), &output)
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +49,15 @@ func TestCompletionGenerationDoesNotLoadRuntimeConfiguration(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "__start_anki-tts") {
 		t.Fatal("generated completion script is missing Cobra entrypoint")
+	}
+}
+
+func TestConcurrencyFlagsWereRemoved(t *testing.T) {
+	cmd := newRootCommand(strings.NewReader(""), io.Discard, io.Discard)
+	for _, name := range []string{"synthesis-concurrency", "audio-concurrency"} {
+		if cmd.Flags().Lookup(name) != nil {
+			t.Fatalf("flag --%s is still registered", name)
+		}
 	}
 }
 

@@ -70,7 +70,13 @@ func TestFailuresBeforeUploadLeaveAnkiUnchanged(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			client := &fakeAnki{}
-			service := New(client, container(t, test.provider), test.transformer)
+			config := DefaultPipelineConfig()
+			config.Synthesis.Retry.MaxAttempts = 1
+			config.Audio.Retry.MaxAttempts = 1
+			service, configErr := NewWithConfig(client, container(t, test.provider), test.transformer, config)
+			if configErr != nil {
+				t.Fatal(configErr)
+			}
 			req := spec(test.provider)
 			if test.name == "empty source" {
 				field := req.Notes[0].Fields["Front"]
@@ -117,7 +123,12 @@ func TestFinalAudioValidationAndClosure(t *testing.T) {
 			client := &fakeAnki{}
 			voice := &fakeVoice{ReadCloser: io.NopCloser(bytes.NewReader(test.data)), format: test.format}
 			provider := &fakeTTS{voice: voice}
-			service := New(client, container(t, provider), nil)
+			config := DefaultPipelineConfig()
+			config.Synthesis.Retry.MaxAttempts = 1
+			service, configErr := NewWithConfig(client, container(t, provider), nil, config)
+			if configErr != nil {
+				t.Fatal(configErr)
+			}
 			_, err := executeOne(context.Background(), service, spec(provider))
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error=%v want containing %q", err, test.want)
@@ -143,7 +154,12 @@ func TestMissingTTSServiceIsRejected(t *testing.T) {
 func TestNoteUpdateFailureReportsStoredMedia(t *testing.T) {
 	client := &fakeAnki{updateErr: errors.New("update failed")}
 	provider := &fakeTTS{voice: voice("audio", "mp3")}
-	service := New(client, container(t, provider), nil)
+	config := DefaultPipelineConfig()
+	config.Persistence.Retry.MaxAttempts = 1
+	service, configErr := NewWithConfig(client, container(t, provider), nil, config)
+	if configErr != nil {
+		t.Fatal(configErr)
+	}
 	_, err := executeOne(context.Background(), service, spec(provider))
 	if err == nil || !strings.Contains(err.Error(), "was stored") || client.storeCalls != 1 {
 		t.Fatalf("error=%v stores=%d", err, client.storeCalls)
@@ -175,10 +191,7 @@ func executeOne(ctx context.Context, service *Service, request GenerationSpec) (
 	if err != nil {
 		return GenerateResult{}, err
 	}
-	batch, err := service.Execute(ctx, plan, PipelineOptions{
-		SynthesisConcurrency: 1,
-		AudioConcurrency:     1,
-	})
+	batch, err := service.Execute(ctx, plan, ExecuteOptions{})
 	if err != nil {
 		return GenerateResult{}, err
 	}

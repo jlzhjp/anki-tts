@@ -9,6 +9,9 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
+
+	"github.com/charmbracelet/x/term"
 
 	"jlzhjp.dev/anki-tts/tts"
 	"jlzhjp.dev/anki-tts/workflow"
@@ -43,6 +46,13 @@ func runBatch(ctx context.Context, appWorkflow *workflow.Service, selector workf
 	if err != nil {
 		return err
 	}
+	if isTerminal(input) && isTerminal(output) {
+		result, executionErr, processed := runBatchTUI(ctx, appWorkflow, plan, options.yes, input, output)
+		if !processed {
+			return nil
+		}
+		return batchResultError(result, executionErr)
+	}
 
 	overwrites := showNotes(output, plan.Items())
 	if !options.yes {
@@ -67,16 +77,9 @@ func runBatch(ctx context.Context, appWorkflow *workflow.Service, selector workf
 		}
 	}
 
-	result, executionErr := appWorkflow.Execute(ctx, plan, workflow.PipelineOptions{
-		SynthesisConcurrency: options.synthesisConcurrency,
-		AudioConcurrency:     options.audioConcurrency,
-		OnResult: func(item workflow.ItemResult) {
-			if item.Err != nil {
-				fmt.Fprintf(output, "FAILED note %d (%s): %v\n", item.NoteID, item.Stage, item.Err)
-				return
-			}
-			fmt.Fprintf(output, "Generated note %d\n", item.NoteID)
-		},
+	reporter := &plainProgressReporter{output: output}
+	result, executionErr := appWorkflow.Execute(ctx, plan, workflow.ExecuteOptions{
+		Progress: reporter,
 	})
 	return reportBatchResult(output, result, executionErr)
 }
@@ -99,13 +102,23 @@ func reportBatchResult(output io.Writer, result workflow.BatchResult, executionE
 			fmt.Fprintf(output, "  note %d: %v\n", item.NoteID, item.Err)
 		}
 	}
+	return batchResultError(result, executionErr)
+}
+
+func batchResultError(result workflow.BatchResult, executionErr error) error {
 	if executionErr != nil {
 		return executionErr
 	}
-	if len(failures) > 0 {
-		return fmt.Errorf("audio generation failed for %d note(s): %w", len(failures), errors.Join(failures...))
+	failures := make([]error, 0)
+	for _, item := range result.Items {
+		if item.Err != nil {
+			failures = append(failures, item.Err)
+		}
 	}
-	return nil
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("audio generation failed for %d note(s): %w", len(failures), errors.Join(failures...))
 }
 
 func showNotes(output io.Writer, notes []workflow.PlannedNote) int {
@@ -136,6 +149,34 @@ func highlight(output io.Writer, value string) string {
 		return value
 	}
 	return "\x1b[1;31m" + value + "\x1b[0m"
+}
+
+func isTerminal(stream any) bool {
+	file, ok := stream.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(file.Fd())
+}
+
+type plainProgressReporter struct {
+	mu     sync.Mutex
+	output io.Writer
+}
+
+func (r *plainProgressReporter) Report(event workflow.ProgressEvent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch event.Kind {
+	case workflow.ProgressRetrying:
+		fmt.Fprintf(r.output, "Retrying note %d (%s, attempt %d/%d): %v\n", event.NoteID, event.Step, event.Attempt, event.MaxAttempts, event.Err)
+	case workflow.ProgressFailed:
+		fmt.Fprintf(r.output, "FAILED note %d (%s): %v\n", event.NoteID, event.Step, event.Err)
+	case workflow.ProgressCompleted:
+		if event.Step == workflow.StepUpdateNote {
+			fmt.Fprintf(r.output, "Generated note %d\n", event.NoteID)
+		}
+	}
 }
 
 func confirm(reader *bufio.Reader, output io.Writer, prompt string) (bool, error) {

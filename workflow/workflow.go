@@ -2,6 +2,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"golang.org/x/sync/errgroup"
@@ -19,11 +21,6 @@ import (
 )
 
 const maxFinalAudioSize = 32 << 20 // 32 MiB
-
-const (
-	DefaultSynthesisConcurrency = 4
-	DefaultAudioConcurrency     = 2
-)
 
 // AnkiClient contains the Anki operations used by the workflow.
 type AnkiClient interface {
@@ -77,12 +74,9 @@ func (p Plan) Items() []PlannedNote {
 	return items
 }
 
-// PipelineOptions controls bounded stage parallelism. OnResult is invoked
-// serially as notes finish.
-type PipelineOptions struct {
-	SynthesisConcurrency int
-	AudioConcurrency     int
-	OnResult             func(ItemResult)
+// ExecuteOptions supplies observers for one pipeline execution.
+type ExecuteOptions struct {
+	Progress ProgressReporter
 }
 
 // GenerateResult describes a successfully stored voice.
@@ -146,19 +140,40 @@ type materializedAudio struct {
 	costErr  error
 }
 
+type synthesizedAudio struct {
+	data      []byte
+	format    string
+	mediaType string
+	cost      *float64
+	costErr   error
+}
+
 // Service coordinates browsing Anki and generating audio for notes.
 type Service struct {
 	anki        AnkiClient
 	services    *tts.Container
 	transformer tts.Transformer
+	pipeline    PipelineConfig
 }
 
 // New creates a workflow service.
 func New(client AnkiClient, services *tts.Container, transformer tts.Transformer) *Service {
+	service, err := NewWithConfig(client, services, transformer, DefaultPipelineConfig())
+	if err != nil {
+		panic(err)
+	}
+	return service
+}
+
+// NewWithConfig creates a workflow service with an explicit execution policy.
+func NewWithConfig(client AnkiClient, services *tts.Container, transformer tts.Transformer, pipeline PipelineConfig) (*Service, error) {
 	if services == nil {
 		services = tts.NewContainer()
 	}
-	return &Service{anki: client, services: services, transformer: transformer}
+	if err := pipeline.validate(); err != nil {
+		return nil, fmt.Errorf("configure generation pipeline: %w", err)
+	}
+	return &Service{anki: client, services: services, transformer: transformer, pipeline: pipeline}, nil
 }
 
 func (s *Service) ListDecks(ctx context.Context) ([]string, error) {
@@ -230,13 +245,7 @@ func (s *Service) Plan(spec GenerationSpec) (Plan, error) {
 }
 
 // Execute runs a prepared plan through the bounded concurrent pipeline.
-func (s *Service) Execute(ctx context.Context, plan Plan, options PipelineOptions) (BatchResult, error) {
-	if options.SynthesisConcurrency <= 0 {
-		return BatchResult{}, errors.New("synthesis concurrency must be positive")
-	}
-	if options.AudioConcurrency <= 0 {
-		return BatchResult{}, errors.New("audio concurrency must be positive")
-	}
+func (s *Service) Execute(ctx context.Context, plan Plan, options ExecuteOptions) (BatchResult, error) {
 	results := BatchResult{Items: make([]ItemResult, len(plan.jobs))}
 	if len(plan.jobs) == 0 {
 		return results, nil
@@ -244,37 +253,30 @@ func (s *Service) Execute(ctx context.Context, plan Plan, options PipelineOption
 
 	group, pipelineCtx := errgroup.WithContext(ctx)
 	prepared := make(chan pipelineItem[struct{}])
-	synthesized := make(chan pipelineItem[tts.Voice])
+	synthesized := make(chan pipelineItem[synthesizedAudio])
 	audio := make(chan pipelineItem[materializedAudio])
 	persisted := make(chan pipelineItem[GenerateResult])
 
 	group.Go(func() error { return feedJobs(pipelineCtx, plan.jobs, prepared) })
 	group.Go(func() error {
-		return mapConcurrent(pipelineCtx, options.SynthesisConcurrency, StageSynthesis, prepared, synthesized,
-			func(ctx context.Context, job preparedJob, _ struct{}) (tts.Voice, error) {
-				voice, err := job.service.Service.Generate(ctx, tts.Input{Text: job.text})
-				if err != nil {
-					return nil, err
-				}
-				if voice == nil {
-					return nil, errors.New("TTS service returned no voice")
-				}
-				return voice, nil
-			},
-			func(voice tts.Voice) {
-				if voice != nil {
-					_ = voice.Close()
-				}
-			})
-	})
-	group.Go(func() error {
-		return mapConcurrent(pipelineCtx, options.AudioConcurrency, StageAudio, synthesized, audio,
-			func(ctx context.Context, job preparedJob, voice tts.Voice) (materializedAudio, error) {
-				return s.materialize(ctx, job, voice)
+		return mapConcurrent(pipelineCtx, s.pipeline.Synthesis.Concurrency, StageSynthesis, prepared, synthesized,
+			func(ctx context.Context, job preparedJob, _ struct{}) (synthesizedAudio, error) {
+				return executeStep(ctx, options.Progress, job, StageSynthesis, StepSynthesize, s.pipeline.Synthesis.Retry,
+					func() (synthesizedAudio, error) { return s.synthesize(ctx, job) })
 			}, nil)
 	})
 	group.Go(func() error {
-		return mapConcurrent(pipelineCtx, 1, StagePersistence, audio, persisted, s.persist, nil)
+		return mapConcurrent(pipelineCtx, s.pipeline.Audio.Concurrency, StageAudio, synthesized, audio,
+			func(ctx context.Context, job preparedJob, source synthesizedAudio) (materializedAudio, error) {
+				return executeStep(ctx, options.Progress, job, StageAudio, StepTransform, s.pipeline.Audio.Retry,
+					func() (materializedAudio, error) { return s.materialize(ctx, job, source) })
+			}, nil)
+	})
+	group.Go(func() error {
+		return mapConcurrent(pipelineCtx, s.pipeline.Persistence.Concurrency, StagePersistence, audio, persisted,
+			func(ctx context.Context, job preparedJob, audio materializedAudio) (GenerateResult, error) {
+				return s.persist(ctx, options.Progress, job, audio)
+			}, nil)
 	})
 
 	waitResult := make(chan error, 1)
@@ -288,9 +290,6 @@ func (s *Service) Execute(ctx context.Context, plan Plan, options PipelineOption
 			outcome = *item.failure
 		}
 		results.Items[outcome.Index] = outcome
-		if options.OnResult != nil {
-			options.OnResult(outcome)
-		}
 	}
 	waitErr := <-waitResult
 	if ctxErr := ctx.Err(); ctxErr != nil {
@@ -312,7 +311,31 @@ func feedJobs(ctx context.Context, jobs []preparedJob, output chan<- pipelineIte
 	return nil
 }
 
-func (s *Service) materialize(ctx context.Context, job preparedJob, voice tts.Voice) (materializedAudio, error) {
+func (s *Service) synthesize(ctx context.Context, job preparedJob) (synthesizedAudio, error) {
+	voice, err := job.service.Service.Generate(ctx, tts.Input{Text: job.text})
+	if err != nil {
+		if voice != nil {
+			_ = voice.Close()
+		}
+		return synthesizedAudio{}, err
+	}
+	if voice == nil {
+		return synthesizedAudio{}, errors.New("TTS service returned no voice")
+	}
+	data, format, mediaType, err := readVoice(ctx, voice)
+	if err != nil {
+		return synthesizedAudio{}, err
+	}
+	var cost *float64
+	costValue, costErr := voice.LoadCost(ctx)
+	if costErr == nil {
+		cost = &costValue
+	}
+	return synthesizedAudio{data: data, format: format, mediaType: mediaType, cost: cost, costErr: costErr}, nil
+}
+
+func (s *Service) materialize(ctx context.Context, job preparedJob, source synthesizedAudio) (materializedAudio, error) {
+	voice := tts.Voice(&bufferedVoice{Reader: bytes.NewReader(source.data), format: source.format, mediaType: source.mediaType, cost: source.cost, costErr: source.costErr})
 	if s.transformer != nil {
 		transformed, err := s.transformer.Transform(ctx, voice)
 		if err != nil {
@@ -324,11 +347,20 @@ func (s *Service) materialize(ctx context.Context, job preparedJob, voice tts.Vo
 		}
 		voice = transformed
 	}
+	data, format, _, err := readVoice(ctx, voice)
+	if err != nil {
+		return materializedAudio{}, err
+	}
+	hash := sha256.Sum256(data)
+	filename := fmt.Sprintf("anki-tts-%d-%x.%s", job.note.ID, hash[:6], format)
+	return materializedAudio{data: data, filename: filename, cost: source.cost, costErr: source.costErr}, nil
+}
 
+func readVoice(ctx context.Context, voice tts.Voice) ([]byte, string, string, error) {
 	format := safeFormat(voice.Format())
 	if format == "" {
 		_ = voice.Close()
-		return materializedAudio{}, fmt.Errorf("audio pipeline returned invalid format %q", voice.Format())
+		return nil, "", "", fmt.Errorf("audio pipeline returned invalid format %q", voice.Format())
 	}
 	var closeOnce sync.Once
 	var closeErr error
@@ -338,42 +370,77 @@ func (s *Service) materialize(ctx context.Context, job preparedJob, voice tts.Vo
 	stopCancellationClose()
 	closeVoice()
 	if readErr != nil {
-		return materializedAudio{}, fmt.Errorf("read final audio: %w", readErr)
+		return nil, "", "", fmt.Errorf("read audio: %w", readErr)
 	}
 	if closeErr != nil {
-		return materializedAudio{}, fmt.Errorf("close final audio: %w", closeErr)
+		return nil, "", "", fmt.Errorf("close audio: %w", closeErr)
 	}
 	if len(data) == 0 {
-		return materializedAudio{}, errors.New("audio pipeline returned empty data")
+		return nil, "", "", errors.New("audio pipeline returned empty data")
 	}
 	if len(data) > maxFinalAudioSize {
-		return materializedAudio{}, fmt.Errorf("final audio exceeds %d bytes", maxFinalAudioSize)
+		return nil, "", "", fmt.Errorf("audio exceeds %d bytes", maxFinalAudioSize)
 	}
-
-	var cost *float64
-	costValue, costErr := voice.LoadCost(ctx)
-	if costErr == nil {
-		cost = &costValue
-	}
-	hash := sha256.Sum256(data)
-	filename := fmt.Sprintf("anki-tts-%d-%x.%s", job.note.ID, hash[:6], format)
-	return materializedAudio{data: data, filename: filename, cost: cost, costErr: costErr}, nil
+	return data, format, voice.MediaType(), nil
 }
 
-func (s *Service) persist(ctx context.Context, job preparedJob, audio materializedAudio) (GenerateResult, error) {
-	storedFilename, err := s.anki.StoreMediaFile(ctx, audio.filename, audio.data)
+func (s *Service) persist(ctx context.Context, reporter ProgressReporter, job preparedJob, audio materializedAudio) (GenerateResult, error) {
+	storedFilename, err := executeStep(ctx, reporter, job, StagePersistence, StepStoreMedia, s.pipeline.Persistence.Retry,
+		func() (string, error) { return s.anki.StoreMediaFile(ctx, audio.filename, audio.data) })
 	if err != nil {
 		return GenerateResult{}, err
 	}
 	tag := "[sound:" + storedFilename + "]"
-	err = s.anki.UpdateNote(ctx, anki.NoteUpdate{
-		ID:     job.note.ID,
-		Fields: map[string]string{job.destinationField: tag},
-	})
+	_, err = executeStep(ctx, reporter, job, StagePersistence, StepUpdateNote, s.pipeline.Persistence.Retry,
+		func() (struct{}, error) {
+			return struct{}{}, s.anki.UpdateNote(ctx, anki.NoteUpdate{
+				ID: job.note.ID, Fields: map[string]string{job.destinationField: tag},
+			})
+		})
 	if err != nil {
 		return GenerateResult{}, &PartialPersistenceError{Filename: storedFilename, Err: err}
 	}
 	return GenerateResult{Filename: storedFilename, Cost: audio.cost, CostErr: audio.costErr}, nil
+}
+
+func executeStep[T any](ctx context.Context, reporter ProgressReporter, job preparedJob, stage Stage, step Step, config RetryConfig, operation func() (T, error)) (T, error) {
+	reportProgress(reporter, ProgressEvent{Kind: ProgressStarted, Index: job.index, NoteID: job.note.ID, Stage: stage, Step: step, Attempt: 1, MaxAttempts: config.MaxAttempts})
+	value, err := retry(ctx, config, func(attempt int, retryAt time.Time, err error) {
+		reportProgress(reporter, ProgressEvent{Kind: ProgressRetrying, Index: job.index, NoteID: job.note.ID, Stage: stage, Step: step, Attempt: attempt, MaxAttempts: config.MaxAttempts, RetryAt: retryAt, Err: err})
+	}, operation)
+	kind := ProgressCompleted
+	if err != nil {
+		kind = ProgressFailed
+	}
+	reportProgress(reporter, ProgressEvent{Kind: kind, Index: job.index, NoteID: job.note.ID, Stage: stage, Step: step, MaxAttempts: config.MaxAttempts, Err: err})
+	return value, err
+}
+
+func reportProgress(reporter ProgressReporter, event ProgressEvent) {
+	if reporter != nil {
+		reporter.Report(event)
+	}
+}
+
+type bufferedVoice struct {
+	*bytes.Reader
+	format    string
+	mediaType string
+	cost      *float64
+	costErr   error
+}
+
+func (*bufferedVoice) Close() error        { return nil }
+func (v *bufferedVoice) Format() string    { return v.format }
+func (v *bufferedVoice) MediaType() string { return v.mediaType }
+func (v *bufferedVoice) LoadCost(context.Context) (float64, error) {
+	if v.costErr != nil {
+		return 0, v.costErr
+	}
+	if v.cost == nil {
+		return 0, nil
+	}
+	return *v.cost, nil
 }
 
 func failedResult(job preparedJob, stage Stage, err error) ItemResult {
