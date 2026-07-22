@@ -8,15 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
-	"net/url"
 	"os"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
-	"unicode/utf8"
 
 	"jlzhjp.dev/anki-tts/tts"
 )
@@ -102,6 +97,7 @@ func (f *Factory) Create(config Config) (tts.Service, error) {
 		return nil, errors.New("create OpenRouter TTS service: model is required")
 	}
 
+	// Load OpenRouter API Key
 	apiKey := strings.TrimSpace(config.APIKey)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(os.Getenv(apiKeyEnvironment))
@@ -110,10 +106,13 @@ func (f *Factory) Create(config Config) (tts.Service, error) {
 		return nil, fmt.Errorf("create OpenRouter TTS service: api_key is required (or set %s)", apiKeyEnvironment)
 	}
 
+	// Load voice
 	voice := strings.TrimSpace(config.Voice)
 	if voice == "" {
 		voice = defaultVoice
 	}
+
+	// Load format
 	format := strings.TrimSpace(config.ResponseFormat)
 	if format == "" {
 		format = defaultFormat
@@ -130,25 +129,23 @@ func (f *Factory) Create(config Config) (tts.Service, error) {
 
 	return &service{
 		endpoint:       f.endpoint,
-		modelsEndpoint: f.modelsEndpoint,
 		apiKey:         apiKey,
 		model:          model,
 		voice:          voice,
 		format:         format,
 		httpClient:     f.httpClient,
+		costCalculator: newOpenRouterCostCalculator(f.modelsEndpoint, apiKey, f.httpClient),
 	}, nil
 }
 
 type service struct {
 	endpoint       string
-	modelsEndpoint string
 	apiKey         string
 	model          string
 	voice          string
 	format         string
 	httpClient     HTTPClient
-	pricingMu      sync.Mutex
-	pricePerChar   *float64
+	costCalculator costCalculator
 }
 
 type speechRequest struct {
@@ -202,8 +199,9 @@ func (s *service) Generate(ctx context.Context, input tts.Input) (tts.Voice, err
 		stream:         &limitedAudioStream{body: resp.Body, remaining: maxAudioSize},
 		mediaType:      mediaType,
 		format:         s.format,
-		characterCount: utf8.RuneCountInString(input.Text),
-		service:        s,
+		sentence:       input.Text,
+		model:          s.model,
+		costCalculator: s.costCalculator,
 	}, nil
 }
 
@@ -211,108 +209,27 @@ type voiceResult struct {
 	stream         io.ReadCloser
 	mediaType      string
 	format         string
-	characterCount int
-	service        *service
+	sentence       string
+	model          string
+	costCalculator costCalculator
 }
 
 func (v *voiceResult) Read(p []byte) (int, error) { return v.stream.Read(p) }
 func (v *voiceResult) Close() error               { return v.stream.Close() }
 func (v *voiceResult) Format() string             { return v.format }
 func (v *voiceResult) MediaType() string          { return v.mediaType }
-
 func (v *voiceResult) LoadCost(ctx context.Context) (float64, error) {
-	price, err := v.service.loadPricePerCharacter(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return float64(v.characterCount) * price, nil
+	return v.costCalculator.Calculate(ctx, v.sentence, v.model)
 }
 
-func (s *service) loadPricePerCharacter(ctx context.Context) (float64, error) {
-	s.pricingMu.Lock()
-	defer s.pricingMu.Unlock()
-	if s.pricePerChar != nil {
-		return *s.pricePerChar, nil
-	}
-
-	endpoint, err := url.Parse(s.modelsEndpoint)
-	if err != nil {
-		return 0, fmt.Errorf("load OpenRouter TTS pricing: parse endpoint: %w", err)
-	}
-	query := endpoint.Query()
-	query.Set("output_modalities", "speech")
-	endpoint.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return 0, fmt.Errorf("load OpenRouter TTS pricing: create request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("load OpenRouter TTS pricing: send request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return 0, openRouterAPIError("load OpenRouter TTS pricing", resp, s.apiKey)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxModelsResponseSize+1))
-	if err != nil {
-		return 0, fmt.Errorf("load OpenRouter TTS pricing: read response: %w", err)
-	}
-	if len(body) > maxModelsResponseSize {
-		return 0, fmt.Errorf("load OpenRouter TTS pricing: response exceeds %d bytes", maxModelsResponseSize)
-	}
-	var result struct {
-		Data []struct {
-			ID      string `json:"id"`
-			Pricing struct {
-				Prompt string `json:"prompt"`
-			} `json:"pricing"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return 0, fmt.Errorf("load OpenRouter TTS pricing: decode response: %w", err)
-	}
-	for _, model := range result.Data {
-		if model.ID != s.model {
-			continue
-		}
-		price, err := strconv.ParseFloat(model.Pricing.Prompt, 64)
-		if err != nil || price < 0 || math.IsNaN(price) || math.IsInf(price, 0) {
-			return 0, fmt.Errorf("load OpenRouter TTS pricing: model %q has invalid per-character price %q", s.model, model.Pricing.Prompt)
-		}
-		s.pricePerChar = &price
-		return price, nil
-	}
-	return 0, fmt.Errorf("load OpenRouter TTS pricing: model %q was not found in speech models", s.model)
-}
-
-type limitedAudioStream struct {
-	body      io.ReadCloser
-	remaining int64
-}
-
-func (s *limitedAudioStream) Read(p []byte) (int, error) {
-	buffer := p
-	if int64(len(buffer)) > s.remaining+1 {
-		buffer = buffer[:s.remaining+1]
-	}
-	n, err := s.body.Read(buffer)
-	if int64(n) > s.remaining {
-		return 0, fmt.Errorf("generate OpenRouter speech: response exceeds %d bytes", maxAudioSize)
-	}
-	s.remaining -= int64(n)
-	return n, err
-}
-
-func (s *limitedAudioStream) Close() error {
-	return s.body.Close()
-}
-
+// openRouterError converts an unsuccessful speech response into a descriptive error.
 func openRouterError(resp *http.Response, apiKey string) error {
 	return openRouterAPIError("generate OpenRouter speech", resp, apiKey)
 }
 
+// openRouterAPIError reads a bounded OpenRouter error response, includes its
+// message when available, and redacts the API key before returning it.
+// For example: "generate OpenRouter speech: HTTP 401 Unauthorized: invalid API key".
 func openRouterAPIError(operation string, resp *http.Response, apiKey string) error {
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 	if readErr == nil {

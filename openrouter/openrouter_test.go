@@ -93,67 +93,6 @@ func TestFactoryConfigurationErrors(t *testing.T) {
 	}
 }
 
-func TestGenerateRequestAndPricing(t *testing.T) {
-	const endpoint = "https://example.test/speech"
-	const modelsEndpoint = "https://example.test/models"
-	modelsCalls := 0
-	factory := NewFactory(
-		WithEndpoint(endpoint),
-		WithModelsEndpoint(modelsEndpoint),
-		WithHTTPClient(doerFunc(func(req *http.Request) (*http.Response, error) {
-			switch req.Method {
-			case http.MethodPost:
-				if req.URL.String() != endpoint {
-					t.Fatalf("request URL = %s", req.URL)
-				}
-				if got := req.Header.Get("Content-Type"); got != "application/json" {
-					t.Fatalf("Content-Type = %q", got)
-				}
-				resp := response(http.StatusOK, "audio/mpeg", []byte{1, 2, 3})
-				return resp, nil
-			case http.MethodGet:
-				modelsCalls++
-				if req.URL.Path != "/models" || req.URL.Query().Get("output_modalities") != "speech" {
-					t.Fatalf("pricing request URL = %s", req.URL)
-				}
-				if got := req.Header.Get("Authorization"); got != "Bearer secret" {
-					t.Fatalf("Authorization = %q", got)
-				}
-				return response(http.StatusOK, "application/json", []byte(`{"data":[{"id":"model","pricing":{"prompt":"0.000625","completion":"0"}}]}`)), nil
-			default:
-				t.Fatalf("method = %s", req.Method)
-				return nil, nil
-			}
-		})),
-	)
-	service, err := factory.Create(Config{Model: "model", APIKey: "secret"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	voice, err := service.Generate(context.Background(), tts.Input{Text: "猫a"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	audio := readVoiceAudio(t, voice)
-	if !bytes.Equal(audio, []byte{1, 2, 3}) {
-		t.Fatalf("voice = %+v", voice)
-	}
-	cost, err := voice.LoadCost(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cost != 0.00125 {
-		t.Fatalf("cost = %v", cost)
-	}
-	if _, err := voice.LoadCost(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if modelsCalls != 1 {
-		t.Fatalf("models API calls = %d, want 1", modelsCalls)
-	}
-}
-
 func TestGenerateLeavesSuccessfulResponseStreaming(t *testing.T) {
 	body := &countingReadCloser{Reader: strings.NewReader("streamed audio")}
 	service := mustService(t, doerFunc(func(*http.Request) (*http.Response, error) {
@@ -171,17 +110,6 @@ func TestGenerateLeavesSuccessfulResponseStreaming(t *testing.T) {
 	}
 	if got := string(readVoiceAudio(t, voice)); got != "streamed audio" {
 		t.Fatalf("audio = %q", got)
-	}
-}
-
-func TestGeneratedAudioStreamEnforcesSizeLimit(t *testing.T) {
-	stream := &limitedAudioStream{
-		body:      io.NopCloser(strings.NewReader("12345")),
-		remaining: 4,
-	}
-	_, err := io.ReadAll(stream)
-	if err == nil || !strings.Contains(err.Error(), "response exceeds") {
-		t.Fatalf("error = %v", err)
 	}
 }
 
