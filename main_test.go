@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/anki-tts/ffmpeg"
 	"jlzhjp.dev/anki-tts/workflow"
 )
 
@@ -161,6 +162,6 @@ func TestPipelineConfigUsesDefaultsAndRejectsInvalidValues(t *testing.T) {
 
 func configFromFFmpeg(format string) config {
 	cfg := config{}
-	cfg.FFmpeg = &ffmpegConfig{Format: format}
+	cfg.FFmpeg = &ffmpegConfig{Format: ffmpeg.Format(format)}
 	return cfg
 }

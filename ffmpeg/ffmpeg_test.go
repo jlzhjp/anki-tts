@@ -61,22 +61,44 @@ func TestTransformStreamsAudio(t *testing.T) {
 	}
 }
 
+func TestTransformSeparatesMuxerFromExtension(t *testing.T) {
+	runner := &fakeRunner{output: []byte("transformed")}
+	transformer, err := NewWithRunner(Config{Format: FormatAAC}, runner, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voice, err := transformer.Transform(context.Background(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(voice); err != nil {
+		t.Fatal(err)
+	}
+	if voice.Format() != "aac" {
+		t.Fatalf("extension = %q", voice.Format())
+	}
+	if got := runner.args[len(runner.args)-2]; got != "adts" {
+		t.Fatalf("muxer = %q", got)
+	}
+}
+
 func TestTransformErrors(t *testing.T) {
 	runErr := errors.New("exit status 1")
 	spawnErr := errors.New("fork/exec ffmpeg: resource unavailable")
 	tests := []struct {
-		name      string
-		runner    *fakeRunner
-		limit     int64
-		cancel    bool
-		want      string
-		wantIs    error
-		startFail bool
+		name       string
+		runner     *fakeRunner
+		limit      int64
+		cancel     bool
+		want       string
+		wantIs     error
+		startFail  bool
+		wantKilled bool
 	}{
 		{name: "spawn", runner: &fakeRunner{startErr: spawnErr}, limit: 10, want: "resource unavailable", wantIs: spawnErr, startFail: true},
 		{name: "execution with stderr", runner: &fakeRunner{waitErr: runErr, stderr: "bad codec", output: []byte("partial")}, limit: 10, want: "exit status 1: bad codec", wantIs: runErr},
 		{name: "empty output", runner: &fakeRunner{}, limit: 10, want: "command produced empty output"},
-		{name: "size limit", runner: &fakeRunner{output: []byte("12345")}, limit: 4, want: "exceeds configured size limit (4 bytes)", wantIs: errOutputTooLarge},
+		{name: "size limit", runner: &fakeRunner{output: []byte("12345")}, limit: 4, want: "exceeds configured size limit (4 bytes)", wantIs: errOutputTooLarge, wantKilled: true},
 		{name: "cancellation", runner: &fakeRunner{waitErr: errors.New("killed")}, limit: 10, cancel: true, want: "context canceled", wantIs: context.Canceled},
 	}
 	for _, test := range tests {
@@ -107,6 +129,66 @@ func TestTransformErrors(t *testing.T) {
 			}
 			if test.wantIs != nil && !errors.Is(err, test.wantIs) {
 				t.Fatalf("error = %v, want errors.Is %v", err, test.wantIs)
+			}
+			if test.runner.killed != test.wantKilled {
+				t.Fatalf("killed = %v, want %v", test.runner.killed, test.wantKilled)
+			}
+		})
+	}
+}
+
+func TestOutputStreamCloseTerminatesOnce(t *testing.T) {
+	runner := &fakeRunner{output: []byte("unread")}
+	transformer, err := NewWithRunner(Config{Format: "mp3"}, runner, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	voice, err := transformer.Transform(context.Background(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := voice.Close(); err == nil || !strings.Contains(err.Error(), "closed before completion") {
+		t.Fatalf("close error = %v", err)
+	}
+	if !runner.killed || !runner.waited {
+		t.Fatalf("killed = %v, waited = %v", runner.killed, runner.waited)
+	}
+	if err := voice.Close(); err != nil {
+		t.Fatalf("second close = %v", err)
+	}
+}
+
+func TestOutputStreamResultError(t *testing.T) {
+	streamErr := errors.New("stream failed")
+	waitErr := errors.New("exit status 1")
+	tests := []struct {
+		name   string
+		result outputStreamResult
+		want   string
+		is     error
+	}{
+		{name: "success", result: outputStreamResult{bytesRead: 1}},
+		{name: "limit takes precedence", result: outputStreamResult{outputErr: errOutputTooLarge, contextErr: context.Canceled, processErr: waitErr, maxBytes: 4}, want: "exceeds configured size limit (4 bytes)", is: errOutputTooLarge},
+		{name: "stream takes precedence", result: outputStreamResult{outputErr: streamErr, contextErr: context.Canceled, processErr: waitErr}, want: "stream failed", is: streamErr},
+		{name: "context takes precedence", result: outputStreamResult{contextErr: context.Canceled, processErr: waitErr}, want: "context canceled", is: context.Canceled},
+		{name: "process with diagnostic", result: outputStreamResult{processErr: waitErr, diagnostic: "bad codec"}, want: "exit status 1: bad codec", is: waitErr},
+		{name: "process without diagnostic", result: outputStreamResult{processErr: waitErr}, want: "exit status 1", is: waitErr},
+		{name: "empty output", result: outputStreamResult{}, want: "command produced empty output"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.result.resultError()
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want containing %q", err, test.want)
+			}
+			if test.is != nil && !errors.Is(err, test.is) {
+				t.Fatalf("error = %v, want errors.Is %v", err, test.is)
 			}
 		})
 	}
@@ -161,6 +243,7 @@ type fakeRunner struct {
 	args     []string
 	input    []byte
 	waited   bool
+	killed   bool
 }
 
 func (f *fakeRunner) LookPath(string) (string, error) {
@@ -170,19 +253,34 @@ func (f *fakeRunner) LookPath(string) (string, error) {
 	return "/test/ffmpeg", nil
 }
 
-func (f *fakeRunner) Start(_ context.Context, path string, args []string, stdin io.Reader, stderr io.Writer) (io.ReadCloser, func() error, func() error, error) {
+func (f *fakeRunner) Start(_ context.Context, path string, args []string, stdin io.Reader, stderr io.Writer) (RunningCommand, error) {
 	f.path = path
 	f.args = append([]string(nil), args...)
 	input, err := io.ReadAll(stdin)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	f.input = input
 	if f.startErr != nil {
-		return nil, nil, nil, f.startErr
+		return nil, f.startErr
 	}
 	_, _ = io.WriteString(stderr, f.stderr)
-	return io.NopCloser(bytes.NewReader(f.output)), func() error { f.waited = true; return f.waitErr }, func() error { return nil }, nil
+	return &fakeCommand{ReadCloser: io.NopCloser(bytes.NewReader(f.output)), runner: f}, nil
+}
+
+type fakeCommand struct {
+	io.ReadCloser
+	runner *fakeRunner
+}
+
+func (c *fakeCommand) Wait() error {
+	c.runner.waited = true
+	return c.runner.waitErr
+}
+
+func (c *fakeCommand) Kill() error {
+	c.runner.killed = true
+	return nil
 }
 
 type trackedReadCloser struct {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"jlzhjp.dev/anki-tts/internal/streamutil"
 	"jlzhjp.dev/anki-tts/tts"
 )
 
@@ -110,6 +111,18 @@ func TestGenerateLeavesSuccessfulResponseStreaming(t *testing.T) {
 	}
 	if got := string(readVoiceAudio(t, voice)); got != "streamed audio" {
 		t.Fatalf("audio = %q", got)
+	}
+}
+
+func TestVoiceResultEnforcesSizeLimit(t *testing.T) {
+	body := io.NopCloser(strings.NewReader("12345"))
+	voice := &voiceResult{
+		body:   body,
+		stream: streamutil.NewLimitedReader(body, 4),
+	}
+	_, err := io.ReadAll(voice)
+	if err == nil || !strings.Contains(err.Error(), "response exceeds 4 bytes") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

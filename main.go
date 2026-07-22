@@ -43,7 +43,7 @@ type openRouterConfig struct {
 }
 
 type ffmpegConfig struct {
-	Format      string               `toml:"format"`
+	Format      ffmpeg.Format        `toml:"format"`
 	Args        []string             `toml:"args"`
 	Concurrency int                  `toml:"concurrency"`
 	Retry       workflow.RetryConfig `toml:"retry"`

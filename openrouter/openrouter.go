@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"jlzhjp.dev/anki-tts/internal/streamutil"
 	"jlzhjp.dev/anki-tts/tts"
 )
 
@@ -196,7 +197,8 @@ func (s *service) Generate(ctx context.Context, input tts.Input) (tts.Voice, err
 		mediaType = mediaTypeForFormat(s.format)
 	}
 	return &voiceResult{
-		stream:         &limitedAudioStream{body: resp.Body, remaining: maxAudioSize},
+		body:           resp.Body,
+		stream:         streamutil.NewLimitedReader(resp.Body, maxAudioSize),
 		mediaType:      mediaType,
 		format:         s.format,
 		sentence:       input.Text,
@@ -206,7 +208,8 @@ func (s *service) Generate(ctx context.Context, input tts.Input) (tts.Voice, err
 }
 
 type voiceResult struct {
-	stream         io.ReadCloser
+	body           io.Closer
+	stream         *streamutil.LimitedReader
 	mediaType      string
 	format         string
 	sentence       string
@@ -214,10 +217,17 @@ type voiceResult struct {
 	costCalculator costCalculator
 }
 
-func (v *voiceResult) Read(p []byte) (int, error) { return v.stream.Read(p) }
-func (v *voiceResult) Close() error               { return v.stream.Close() }
-func (v *voiceResult) Format() string             { return v.format }
-func (v *voiceResult) MediaType() string          { return v.mediaType }
+func (v *voiceResult) Read(p []byte) (int, error) {
+	n, err := v.stream.Read(p)
+	if errors.Is(err, streamutil.ErrLimitExceeded) {
+		return 0, fmt.Errorf("generate OpenRouter speech: response exceeds %d bytes", v.stream.Limit())
+	}
+	return n, err
+}
+
+func (v *voiceResult) Close() error      { return v.body.Close() }
+func (v *voiceResult) Format() string    { return v.format }
+func (v *voiceResult) MediaType() string { return v.mediaType }
 func (v *voiceResult) LoadCost(ctx context.Context) (float64, error) {
 	return v.costCalculator.Calculate(ctx, v.sentence, v.model)
 }
