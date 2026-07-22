@@ -25,6 +25,7 @@
 
             src = ./.;
             vendorHash = "sha256-iW3EILAKfALa3Hv2bntGqbVRcRmiLJ2aFrV4bJhWz24=";
+            subPackages = [ "cmd/anki-tts" ];
 
             nativeBuildInputs = [
               pkgs.installShellFiles

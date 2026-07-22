@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	ankitts "jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/internal/streamutil"
-	"jlzhjp.dev/anki-tts/tts"
 )
 
 func TestFactoryCreateDefaultsAndEnvironmentKey(t *testing.T) {
@@ -37,7 +37,7 @@ func TestFactoryCreateDefaultsAndEnvironmentKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	voice, err := service.Generate(context.Background(), tts.Input{Text: "hello"})
+	voice, err := service.Generate(context.Background(), ankitts.Input{Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestFactoryConfigKeyTakesPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	voice, err := service.Generate(context.Background(), tts.Input{Text: "hello"})
+	voice, err := service.Generate(context.Background(), ankitts.Input{Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestGenerateLeavesSuccessfulResponseStreaming(t *testing.T) {
 		resp.ContentLength = -1
 		return resp, nil
 	}))
-	voice, err := service.Generate(context.Background(), tts.Input{Text: "hello"})
+	voice, err := service.Generate(context.Background(), ankitts.Input{Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestGenerateErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = service.Generate(context.Background(), tts.Input{Text: "  "})
+		_, err = service.Generate(context.Background(), ankitts.Input{Text: "  "})
 		if err == nil || !strings.Contains(err.Error(), "input text is required") {
 			t.Fatalf("error = %v", err)
 		}
@@ -142,7 +142,7 @@ func TestGenerateErrors(t *testing.T) {
 		service := mustService(t, doerFunc(func(*http.Request) (*http.Response, error) {
 			return response(http.StatusUnauthorized, "application/json", []byte(`{"error":{"message":"invalid credentials for secret"}}`)), nil
 		}))
-		_, err := service.Generate(context.Background(), tts.Input{Text: "hello"})
+		_, err := service.Generate(context.Background(), ankitts.Input{Text: "hello"})
 		if err == nil || !strings.Contains(err.Error(), "401 Unauthorized: invalid credentials for [REDACTED]") {
 			t.Fatalf("error = %v", err)
 		}
@@ -156,7 +156,7 @@ func TestGenerateErrors(t *testing.T) {
 		service := mustService(t, doerFunc(func(*http.Request) (*http.Response, error) {
 			return nil, transportErr
 		}))
-		_, err := service.Generate(context.Background(), tts.Input{Text: "hello"})
+		_, err := service.Generate(context.Background(), ankitts.Input{Text: "hello"})
 		if !errors.Is(err, transportErr) {
 			t.Fatalf("error = %v", err)
 		}
@@ -168,14 +168,14 @@ func TestGenerateErrors(t *testing.T) {
 		}))
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := service.Generate(ctx, tts.Input{Text: "hello"})
+		_, err := service.Generate(ctx, ankitts.Input{Text: "hello"})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("error = %v", err)
 		}
 	})
 }
 
-func mustService(t *testing.T, client HTTPClient) tts.Service {
+func mustService(t *testing.T, client HTTPClient) ankitts.Service {
 	t.Helper()
 	service, err := NewFactory(WithHTTPClient(client)).Create(Config{Model: "model", APIKey: "secret"})
 	if err != nil {
@@ -203,7 +203,7 @@ func response(status int, mediaType string, body []byte) *http.Response {
 	}
 }
 
-func readVoiceAudio(t *testing.T, voice tts.Voice) []byte {
+func readVoiceAudio(t *testing.T, voice ankitts.Voice) []byte {
 	t.Helper()
 	data, err := io.ReadAll(voice)
 	if err != nil {

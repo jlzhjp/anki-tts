@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	ankitts "jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/internal/streamutil"
-	"jlzhjp.dev/anki-tts/tts"
 )
 
 const (
@@ -92,7 +92,7 @@ func NewFactory(options ...Option) *Factory {
 }
 
 // Create validates config and creates an OpenRouter text-to-speech service.
-func (f *Factory) Create(config Config) (tts.Service, error) {
+func (f *Factory) Create(config Config) (ankitts.Service, error) {
 	model := strings.TrimSpace(config.Model)
 	if model == "" {
 		return nil, errors.New("create OpenRouter TTS service: model is required")
@@ -157,7 +157,7 @@ type speechRequest struct {
 }
 
 // Generate synthesizes input text through OpenRouter.
-func (s *service) Generate(ctx context.Context, input tts.Input) (tts.Voice, error) {
+func (s *service) Generate(ctx context.Context, input ankitts.Input) (ankitts.Voice, error) {
 	if strings.TrimSpace(input.Text) == "" {
 		return nil, errors.New("generate OpenRouter speech: input text is required")
 	}
@@ -263,4 +263,4 @@ func mediaTypeForFormat(format string) string {
 	return "audio/mpeg"
 }
 
-var _ tts.Service = (*service)(nil)
+var _ ankitts.Service = (*service)(nil)

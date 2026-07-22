@@ -8,8 +8,8 @@ import (
 	"io"
 	"strings"
 
+	ankitts "jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/internal/streamutil"
-	"jlzhjp.dev/anki-tts/tts"
 )
 
 const (
@@ -81,7 +81,7 @@ func NewWithRunner(config Config, runner CommandRunner, maxOutputSize int64) (*T
 }
 
 // Transform starts FFmpeg and wraps the source voice with transformed audio.
-func (t *Transformer) Transform(ctx context.Context, voice tts.Voice) (tts.Voice, error) {
+func (t *Transformer) Transform(ctx context.Context, voice ankitts.Voice) (ankitts.Voice, error) {
 	if voice == nil {
 		return nil, errors.New("transform audio with FFmpeg: input voice is required")
 	}
@@ -110,7 +110,7 @@ func (t *Transformer) Transform(ctx context.Context, voice tts.Voice) (tts.Voice
 }
 
 type transformedVoice struct {
-	source    tts.Voice
+	source    ankitts.Voice
 	stream    io.ReadCloser
 	mediaType string
 	format    string
@@ -219,4 +219,4 @@ func (r outputStreamResult) resultError() error {
 	}
 }
 
-var _ tts.Transformer = (*Transformer)(nil)
+var _ ankitts.Transformer = (*Transformer)(nil)

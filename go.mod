@@ -9,7 +9,6 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/net v0.57.0
-	golang.org/x/sync v0.21.0
 )
 
 require (
@@ -30,5 +29,6 @@ require (
 	github.com/sahilm/fuzzy v0.1.3 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
