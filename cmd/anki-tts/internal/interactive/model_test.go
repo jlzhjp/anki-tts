@@ -10,110 +10,159 @@ import (
 
 	ankitts "jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/interactive/step"
 )
 
-func TestComposableApplicationNavigationAndContext(t *testing.T) {
+func TestScreenHostInstallsCompletesAndResizesScreen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	requests := make(chan screenRequest)
+	host := newScreenHost(ctx, cancel, requests, make(chan error))
+	screen := &fakeScreen{}
+	reply := make(chan screenOutcome, 1)
+
+	updated, _ := host.Update(screenRequestedMsg{request: screenRequest{
+		screen: screen,
+		reply:  reply,
+		display: step.Display{
+			Step:    3,
+			Context: "Deck: Japanese",
+		},
+	}})
+	host = updated.(*screenHost)
+	if host.active != screen {
+		t.Fatal("screen was not installed")
+	}
+
+	host.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if screen.width != 100 || screen.height >= 30 {
+		t.Fatalf("screen size=%dx%d", screen.width, screen.height)
+	}
+
+	host.Update(step.CompletedMsg{Value: "Front"})
+	outcome := <-reply
+	if outcome.value != "Front" || outcome.back || host.active != nil {
+		t.Fatalf("outcome=%+v active=%T", outcome, host.active)
+	}
+}
+
+func TestScreenHostReturnsBackToClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	host := newScreenHost(ctx, cancel, make(chan screenRequest), make(chan error))
+	screen := &fakeScreen{}
+	reply := make(chan screenOutcome, 1)
+	host.Update(screenRequestedMsg{request: screenRequest{screen: screen, reply: reply}})
+
+	host.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if outcome := <-reply; !outcome.back {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+}
+
+func TestScreenClientPromptReturnsValueAndBack(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	requests := make(chan screenRequest)
+	client := screenClient{requests: requests}
+
+	values := make(chan any, 1)
+	errs := make(chan error, 1)
+	go func() {
+		value, err := client.Prompt(ctx, &fakeScreen{}, step.Display{Step: 1})
+		values <- value
+		errs <- err
+	}()
+	request := <-requests
+	request.reply <- screenOutcome{value: "selected"}
+	if value := <-values; value != "selected" {
+		t.Fatalf("value=%v", value)
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("error=%v", err)
+	}
+
+	go func() {
+		_, err := client.Prompt(ctx, &fakeScreen{}, step.Display{Step: 2})
+		errs <- err
+	}()
+	request = <-requests
+	request.reply <- screenOutcome{back: true}
+	if err := <-errs; !errors.Is(err, step.ErrBack) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestWorkflowSkipsConfiguredSelectionSteps(t *testing.T) {
+	ctx := context.Background()
 	app := &fakeApplication{services: []string{"openrouter"}}
-	m := newInteractive(context.Background(), app)
-	m = update(t, m, decksLoadedMsg{decks: []string{"Japanese", "English"}})
-	deck := m.active().(*deckModel)
-	deck.list.Select(1)
-	m = pressEnter(t, m)
-	if len(m.screens) != 2 || m.deck != "Japanese" {
-		t.Fatalf("screens=%d deck=%q", len(m.screens), m.deck)
+	client := &scriptedClient{}
+	client.prompt = func(screen step.Screen, _ step.Display) (any, error) {
+		client.screens = append(client.screens, screen)
+		switch screen.(type) {
+		case *step.NoteScreen:
+			if len(client.screens) == 1 {
+				return testNote(), nil
+			}
+			return nil, context.Canceled
+		case *step.NoteAudioGenerationScreen:
+			return ankitts.GenerateResult{Filename: "voice.mp3"}, nil
+		default:
+			return nil, errors.New("unexpected screen")
+		}
 	}
 
-	note := testNote()
-	m = update(t, m, notesLoadedMsg{notes: []anki.Note{note}})
-	m = pressEnter(t, m)
-	m = pressEnter(t, m) // source: Front
-	if view := m.View().Content; !strings.Contains(view, "Deck: Japanese") || !strings.Contains(view, "Source: Front") {
-		t.Fatalf("view missing context: %q", view)
+	err := runWorkflow(ctx, client, app, Options{
+		Selector:  ankitts.NoteSelector{Decks: []string{"Japanese"}},
+		FromField: "Front",
+		ToField:   "Audio",
+		Service:   "openrouter",
+		Yes:       true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("workflow error=%v", err)
 	}
-
-	source := m.screens[2].(*fieldModel)
-	source.list.Select(1)
-	m, _ = updateWithCmd(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.active() != source || source.list.Index() != 1 {
-		t.Fatalf("source screen state was not preserved")
+	if len(client.screens) != 3 {
+		t.Fatalf("screens=%d, want note, generation, refreshed note", len(client.screens))
+	}
+	if client.screens[0] != client.screens[2] {
+		t.Fatal("note screen was not preserved for refresh")
+	}
+	if _, ok := client.screens[1].(*step.NoteAudioGenerationScreen); !ok {
+		t.Fatalf("generation screen=%T", client.screens[1])
 	}
 }
 
-func TestSuccessfulGenerationRefreshesNotesAndShowsStatus(t *testing.T) {
-	cost := 0.00125
-	service := "openrouter"
-	app := &fakeApplication{
-		services: []string{service},
-		result:   ankitts.GenerateResult{Filename: "voice.mp3", Cost: &cost},
-	}
-	m := readyAtService(t, app, service)
-	m = pressEnterRunning(t, m)
-	if len(m.screens) != 2 {
-		t.Fatalf("screens=%d, want note screen", len(m.screens))
-	}
-	notes := m.active().(*noteModel)
-	if !notes.busy {
-		t.Fatal("note refresh did not start")
-	}
-	m = update(t, m, notesLoadedMsg{notes: []anki.Note{testNote()}})
-	if view := m.View().Content; !strings.Contains(view, "Cost: $0.001250") || !strings.Contains(view, "Saved voice.mp3 to Audio") {
-		t.Fatalf("view=%q", view)
-	}
-	if app.request.SourceField != "Front" || app.request.DestinationField != "Audio" {
-		t.Fatalf("request=%+v", app.request)
+func TestWorkflowRejectsConfiguredUnknownService(t *testing.T) {
+	err := runWorkflow(
+		context.Background(),
+		&scriptedClient{},
+		&fakeApplication{services: []string{"openrouter"}},
+		Options{Service: "missing"},
+	)
+	if err == nil || !strings.Contains(err.Error(), `TTS service "missing" is not configured`) {
+		t.Fatalf("error=%v", err)
 	}
 }
 
-func TestGenerationErrorCanRetry(t *testing.T) {
-	service := "openrouter"
-	app := &fakeApplication{services: []string{service}, errs: []error{errors.New("temporary failure"), nil}, result: ankitts.GenerateResult{Filename: "voice.mp3"}}
-	m := readyAtService(t, app, service)
-	m = pressEnterRunning(t, m)
-	if m.failure == nil || m.failure.retry == nil {
-		t.Fatalf("failure=%+v", m.failure)
-	}
-	m = pressEnterRunning(t, m)
-	if m.failure != nil || len(m.screens) != 2 || app.generateCalls != 2 {
-		t.Fatalf("failure=%v screens=%d calls=%d", m.failure, len(m.screens), app.generateCalls)
-	}
+type fakeScreen struct {
+	width  int
+	height int
 }
 
-func TestNoServicesShowsInitialError(t *testing.T) {
-	m := newInteractive(context.Background(), &fakeApplication{})
-	if m.failure == nil || !strings.Contains(m.View().Content, "no TTS services") {
-		t.Fatalf("failure=%v view=%q", m.failure, m.View().Content)
-	}
+func (s *fakeScreen) Init() tea.Cmd                       { return nil }
+func (s *fakeScreen) Update(tea.Msg) (tea.Model, tea.Cmd) { return s, nil }
+func (s *fakeScreen) View() tea.View                      { return tea.NewView("screen") }
+func (s *fakeScreen) SetSize(width, height int)           { s.width, s.height = width, height }
+func (s *fakeScreen) Filtering() bool                     { return false }
+
+type scriptedClient struct {
+	prompt  func(step.Screen, step.Display) (any, error)
+	screens []step.Screen
 }
 
-func TestQuitAndResizeAreCoordinatedByRoot(t *testing.T) {
-	app := &fakeApplication{services: []string{"openrouter"}}
-	m := newInteractive(context.Background(), app)
-	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
-	deck := m.active().(*deckModel)
-	if deck.list.Width() != 100 || deck.list.Height() >= 30 {
-		t.Fatalf("list size=%dx%d", deck.list.Width(), deck.list.Height())
-	}
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	if cmd == nil {
-		t.Fatal("q did not produce a quit command")
-	}
-}
-
-func readyAtService(t *testing.T, app *fakeApplication, service string) interactiveModel {
-	t.Helper()
-	m := newInteractive(context.Background(), app)
-	m = update(t, m, decksLoadedMsg{decks: []string{"Japanese"}})
-	m = pressEnter(t, m)
-	m = update(t, m, notesLoadedMsg{notes: []anki.Note{testNote()}})
-	m = pressEnter(t, m) // note
-	m = pressEnter(t, m) // source
-	field := m.active().(*fieldModel)
-	field.list.Select(1)
-	m = pressEnter(t, m) // destination: Audio
-	if got := m.active().(*serviceModel).list.SelectedItem().(item).value.(string); got != service {
-		t.Fatalf("service=%q", got)
-	}
-	return m
+func (c *scriptedClient) Prompt(_ context.Context, screen step.Screen, display step.Display) (any, error) {
+	return c.prompt(screen, display)
 }
 
 func testNote() anki.Note {
@@ -123,102 +172,19 @@ func testNote() anki.Note {
 	}}
 }
 
-func update(t *testing.T, model interactiveModel, msg tea.Msg) interactiveModel {
-	t.Helper()
-	updated, _ := model.Update(msg)
-	result, ok := updated.(interactiveModel)
-	if !ok {
-		t.Fatalf("updated model has type %T", updated)
-	}
-	return result
-}
-
-func updateWithCmd(t *testing.T, model interactiveModel, msg tea.Msg) (interactiveModel, tea.Cmd) {
-	t.Helper()
-	updated, cmd := model.Update(msg)
-	result, ok := updated.(interactiveModel)
-	if !ok {
-		t.Fatalf("updated model has type %T", updated)
-	}
-	return result, cmd
-}
-
-func pressEnter(t *testing.T, model interactiveModel) interactiveModel {
-	t.Helper()
-	model, cmd := updateWithCmd(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd == nil {
-		return model
-	}
-	message := cmd()
-	if _, batched := message.(tea.BatchMsg); batched {
-		return model
-	}
-	return update(t, model, message)
-}
-
-func pressEnterRunning(t *testing.T, model interactiveModel) interactiveModel {
-	t.Helper()
-	model, cmd := updateWithCmd(t, model, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("enter did not produce a command")
-	}
-	message := cmd()
-	model, cmd = updateWithCmd(t, model, message)
-	if cmd == nil {
-		return model
-	}
-	message, ok := generatedFromCommand(cmd)
-	if !ok {
-		t.Fatal("command did not produce a generation result")
-	}
-	return update(t, model, message)
-}
-
-func generatedFromCommand(cmd tea.Cmd) (tea.Msg, bool) {
-	message := cmd()
-	if _, ok := message.(generatedMsg); ok {
-		return message, true
-	}
-	batch, ok := message.(tea.BatchMsg)
-	if !ok {
-		return nil, false
-	}
-	for _, child := range batch {
-		if child == nil {
-			continue
-		}
-		if message, ok := generatedFromCommand(child); ok {
-			return message, true
-		}
-	}
-	return nil, false
-}
-
 type fakeApplication struct {
-	services      []string
-	result        ankitts.GenerateResult
-	errs          []error
-	generateCalls int
-	request       ankitts.GenerationRequest
-	selector      ankitts.NoteSelector
-	notes         []anki.Note
+	services []string
 }
 
 func (f *fakeApplication) ListDecks(context.Context) ([]string, error) { return nil, nil }
 func (f *fakeApplication) SelectNotes(context.Context, ankitts.NoteSelector) ([]anki.Note, error) {
-	return f.notes, nil
+	return nil, nil
 }
 func (f *fakeApplication) ServiceNames() []string   { return f.services }
 func (f *fakeApplication) HasAudioProcessors() bool { return false }
-func (f *fakeApplication) Prepare(request ankitts.GenerationRequest) (ankitts.Plan, error) {
-	f.request = request
+func (f *fakeApplication) Prepare(ankitts.GenerationRequest) (ankitts.Plan, error) {
 	return ankitts.Plan{}, nil
 }
-func (f *fakeApplication) Execute(_ context.Context, _ ankitts.Plan, _ ankitts.ExecuteOptions) (ankitts.BatchResult, error) {
-	call := f.generateCalls
-	f.generateCalls++
-	if call < len(f.errs) && f.errs[call] != nil {
-		return ankitts.BatchResult{}, f.errs[call]
-	}
-	return ankitts.BatchResult{Items: []ankitts.ItemResult{{Result: f.result}}}, nil
+func (f *fakeApplication) Execute(context.Context, ankitts.Plan, ankitts.ExecuteOptions) (ankitts.BatchResult, error) {
+	return ankitts.BatchResult{}, nil
 }

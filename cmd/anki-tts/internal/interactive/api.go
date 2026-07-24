@@ -33,8 +33,21 @@ type Options struct {
 
 // Run starts the interactive terminal UI.
 func Run(ctx context.Context, app Application, options Options, input io.Reader, output io.Writer) error {
-	model := newInteractiveModel(ctx, app, options)
-	_, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output)).Run()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	requests := make(chan screenRequest)
+	done := make(chan error, 1)
+	host := newScreenHost(ctx, cancel, requests, done)
+	client := screenClient{requests: requests}
+	go func() {
+		done <- runWorkflow(ctx, client, app, options)
+	}()
+
+	_, err := tea.NewProgram(host, tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(output)).Run()
 	if err != nil {
 		return fmt.Errorf("run interactive UI: %w", err)
 	}
