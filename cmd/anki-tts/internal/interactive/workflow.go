@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
-	ankitts "jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/anki"
 	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/interactive/step"
 )
@@ -39,7 +40,7 @@ func runWorkflow(ctx context.Context, client step.Client, app Application, optio
 	if len(services) == 0 {
 		return errors.New("no TTS services are configured; add an [openrouter] table to config.toml")
 	}
-	if options.Service != "" && !contains(services, options.Service) {
+	if options.Service != "" && !slices.Contains(services, options.Service) {
 		return fmt.Errorf("TTS service %q is not configured", options.Service)
 	}
 
@@ -254,15 +255,6 @@ func (s workflowState) contextLine() string {
 
 func (s workflowState) display(number int) step.Display {
 	return step.Display{Step: number, Context: s.contextLine()}
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func stageBeforeAction(options Options) workflowStage {
