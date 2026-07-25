@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"jlzhjp.dev/anki-tts/anki"
@@ -16,6 +17,8 @@ import (
 )
 
 const maxFinalAudioSize = 32 << 20 // 32 MiB
+
+const persistenceCommitTimeout = 30 * time.Second
 
 // ExecuteOptions supplies observers for one pipeline execution.
 type ExecuteOptions struct {
@@ -87,6 +90,9 @@ type storedItem struct {
 // Execute runs a prepared plan through its dynamically assembled component stages.
 func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOptions) (BatchResult, error) {
 	result := BatchResult{Items: make([]ItemResult, len(plan.jobs))}
+	for index, job := range plan.jobs {
+		result.Items[index] = ItemResult{Index: index, NoteID: job.noteID}
+	}
 	if len(plan.jobs) == 0 {
 		return result, nil
 	}
@@ -154,7 +160,14 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		if err != nil {
 			return GenerateResult{}, err
 		}
-		generated, err := updateWithRetry(ctx, stored)
+		// Once media is stored, give the note update a bounded opportunity to
+		// complete even if the parent batch is canceled.
+		commitCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			persistenceCommitTimeout,
+		)
+		defer cancel()
+		generated, err := updateWithRetry(commitCtx, stored)
 		if err != nil {
 			return GenerateResult{}, &PartialPersistenceError{Filename: stored.filename, Err: err}
 		}
@@ -176,6 +189,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		})
 	})
 	outcomes, executionErr := pipeline.Collect(ctx, persisted, observer)
+	completed := make([]bool, len(plan.jobs))
 	for _, outcome := range outcomes {
 		job := plan.jobs[outcome.Index]
 		entry := ItemResult{Index: outcome.Index, NoteID: job.noteID, Stage: outcome.Stage, Result: outcome.Value}
@@ -183,6 +197,14 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 			entry.Err = &StageError{NoteID: job.noteID, Stage: outcome.Stage, Err: outcome.Err}
 		}
 		result.Items[outcome.Index] = entry
+		completed[outcome.Index] = true
+	}
+	if executionErr != nil {
+		for index, done := range completed {
+			if !done {
+				result.Items[index].Err = executionErr
+			}
+		}
 	}
 	return result, executionErr
 }

@@ -217,6 +217,71 @@ func TestAnkiUpdateRetryDoesNotRepeatStoredMedia(t *testing.T) {
 	}
 }
 
+func TestCancellationAfterUploadCompletesNoteUpdate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &fakeAnki{afterStore: cancel}
+	provider := &fakeTTS{voice: voice("audio", "mp3")}
+	app := newTestApplication(t, client, provider, nil)
+	plan, err := app.Prepare(spec())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := app.Execute(ctx, plan, ExecuteOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v", err)
+	}
+	if client.updateCalls != 1 {
+		t.Fatalf("update calls=%d", client.updateCalls)
+	}
+	if client.updateContextErr != nil {
+		t.Fatalf("update context error=%v", client.updateContextErr)
+	}
+	if remaining := time.Until(client.updateDeadline); remaining < 29*time.Second || remaining > persistenceCommitTimeout {
+		t.Fatalf("update deadline remaining=%s", remaining)
+	}
+	if result.Items[0].Err != nil || result.Items[0].Result.Filename == "" {
+		t.Fatalf("item=%+v", result.Items[0])
+	}
+}
+
+func TestCancellationMarksNotesThatNeverEnteredPipeline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &fakeAnki{}
+	services := container(t, cancelingTTS{cancel: cancel})
+	config := testPipelineConfig(false)
+	stage := config["openrouter"]
+	stage.Concurrency = 1
+	config["openrouter"] = stage
+	app, err := New(client, services, nil, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := spec()
+	request.Notes = NoteResults(
+		anki.Note{ID: 1, Fields: requestFields()},
+		anki.Note{ID: 2, Fields: requestFields()},
+		anki.Note{ID: 3, Fields: requestFields()},
+	)
+	plan, err := app.Prepare(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := app.Execute(ctx, plan, ExecuteOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v", err)
+	}
+	if len(result.Items) != 3 {
+		t.Fatalf("items=%d", len(result.Items))
+	}
+	for index, item := range result.Items {
+		if item.Index != index || item.NoteID != int64(index+1) || !errors.Is(item.Err, context.Canceled) {
+			t.Fatalf("item %d=%+v", index, item)
+		}
+	}
+}
+
 func container(t *testing.T, service Service) *ServiceContainer {
 	t.Helper()
 	services := NewServiceContainer()
@@ -224,6 +289,13 @@ func container(t *testing.T, service Service) *ServiceContainer {
 		t.Fatal(err)
 	}
 	return services
+}
+
+func requestFields() map[string]anki.Field {
+	return map[string]anki.Field{
+		"Front": {Value: "Hello"},
+		"Audio": {},
+	}
 }
 
 func spec() GenerationRequest {
@@ -291,6 +363,10 @@ type fakeAnki struct {
 	updateCalls   int
 	updateErr     error
 	updateErrs    []error
+	afterStore    func()
+
+	updateContextErr error
+	updateDeadline   time.Time
 }
 
 func (*fakeAnki) FindNoteIDs(context.Context, string) ([]int64, error)    { return nil, nil }
@@ -299,11 +375,16 @@ func (f *fakeAnki) StoreMediaFile(_ context.Context, filename string, data []byt
 	f.storeCalls++
 	f.mediaFilename = filename
 	f.mediaData = append([]byte(nil), data...)
+	if f.afterStore != nil {
+		f.afterStore()
+	}
 	return filename, nil
 }
-func (f *fakeAnki) UpdateNote(_ context.Context, update anki.NoteUpdate) error {
+func (f *fakeAnki) UpdateNote(ctx context.Context, update anki.NoteUpdate) error {
 	f.updateCalls++
 	f.update = update
+	f.updateContextErr = ctx.Err()
+	f.updateDeadline, _ = ctx.Deadline()
 	if len(f.updateErrs) > 0 {
 		err := f.updateErrs[0]
 		f.updateErrs = f.updateErrs[1:]
@@ -315,6 +396,15 @@ func (f *fakeAnki) UpdateNote(_ context.Context, update anki.NoteUpdate) error {
 type fakeTTS struct {
 	input Input
 	voice Voice
+}
+
+type cancelingTTS struct {
+	cancel context.CancelFunc
+}
+
+func (s cancelingTTS) Generate(ctx context.Context, _ Input) (Voice, error) {
+	s.cancel()
+	return nil, ctx.Err()
 }
 
 func (f *fakeTTS) Generate(_ context.Context, input Input) (Voice, error) {

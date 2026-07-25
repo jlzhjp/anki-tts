@@ -206,7 +206,7 @@ func (s *generationScreen) progressView() string {
 			fmt.Fprintf(
 				&builder,
 				" · retry %d/%d in %s",
-				state.attempt,
+				state.attempt+1,
 				state.maxAttempts,
 				remaining.Round(100*time.Millisecond),
 			)

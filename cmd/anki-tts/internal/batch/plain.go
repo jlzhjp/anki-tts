@@ -163,7 +163,7 @@ func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {
 			"Retrying note %d (%s, attempt %d/%d): %v\n",
 			event.NoteID,
 			event.Operation,
-			event.Attempt,
+			event.Attempt+1,
 			event.MaxAttempts,
 			event.Err,
 		)

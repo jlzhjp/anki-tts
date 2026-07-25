@@ -53,7 +53,7 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 		Index:       0,
 		NoteID:      1,
 		Operation:   ankitts.OperationSynthesize,
-		Attempt:     2,
+		Attempt:     1,
 		MaxAttempts: 3,
 		RetryAt:     time.Now().Add(time.Second),
 		Err:         errors.New("rate limited"),

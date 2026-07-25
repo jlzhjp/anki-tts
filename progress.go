@@ -28,11 +28,13 @@ const (
 
 // ProgressEvent is an immutable worker-to-observer status update.
 type ProgressEvent struct {
-	Kind        ProgressKind
-	Index       int
-	NoteID      int64
-	Stage       string
-	Operation   Operation
+	Kind      ProgressKind
+	Index     int
+	NoteID    int64
+	Stage     string
+	Operation Operation
+	// Attempt identifies the attempt being reported. For ProgressRetrying, it
+	// is the failed attempt; the next attempt is Attempt + 1.
 	Attempt     int
 	MaxAttempts int
 	RetryAt     time.Time
@@ -40,7 +42,7 @@ type ProgressEvent struct {
 }
 
 // ProgressReporter receives pipeline events. Implementations must be safe for
-// concurrent calls from stage workers.
+// concurrent calls and return promptly so they do not block stage workers.
 type ProgressReporter interface {
 	Report(ProgressEvent)
 }
