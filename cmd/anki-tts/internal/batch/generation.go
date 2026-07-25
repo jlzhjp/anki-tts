@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -187,8 +187,8 @@ func (s *generationScreen) progressView() string {
 			active = append(active, index)
 		}
 	}
-	sort.Ints(active)
-	sort.Ints(failedNotes)
+	slices.Sort(active)
+	slices.Sort(failedNotes)
 
 	var builder strings.Builder
 	pending := len(s.notes) - succeeded - failed - len(active)

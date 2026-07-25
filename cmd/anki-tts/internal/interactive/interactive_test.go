@@ -14,7 +14,7 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 	note := testNote()
 
 	value, screen, err := chooseDestinationField(
-		context.Background(),
+		t.Context(),
 		client,
 		note,
 		nil,
@@ -28,7 +28,7 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 	}
 
 	_, resumed, err := chooseDestinationField(
-		context.Background(),
+		t.Context(),
 		client,
 		note,
 		screen,
@@ -44,7 +44,7 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 
 func TestChooseSourceFieldRejectsNoteWithoutText(t *testing.T) {
 	_, _, err := chooseSourceField(
-		context.Background(),
+		t.Context(),
 		&fakeClient{},
 		anki.Note{Fields: map[string]anki.Field{"Front": {Value: " "}}},
 		nil,
@@ -83,7 +83,7 @@ func TestGenerateNoteAudioRunsApplication(t *testing.T) {
 		DestinationField: "Audio",
 		Service:          "openrouter",
 	}
-	screen := newNoteAudioGenerationScreen(context.Background(), app, request)
+	screen := newNoteAudioGenerationScreen(t.Context(), app, request)
 	message := screen.generate()()
 	result := requireMessage[generationFinishedMsg](t, message)
 	if result.err != nil || result.result.Filename != "voice.mp3" {
@@ -105,7 +105,7 @@ func requireMessage[T any](t *testing.T, message any) T {
 
 func TestPromptReportsUnexpectedResultType(t *testing.T) {
 	_, err := prompt[string](
-		context.Background(),
+		t.Context(),
 		&fakeClient{value: true},
 		&destinationOverwriteScreen{},
 		display{},

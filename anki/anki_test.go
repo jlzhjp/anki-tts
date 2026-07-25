@@ -2,12 +2,11 @@ package anki
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -19,12 +18,12 @@ func TestListDecks(t *testing.T) {
 		return []string{"Default", "Japanese"}
 	})
 
-	got, err := client.ListDecks(context.Background())
+	got, err := client.ListDecks(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"Default", "Japanese"}
-	if !reflect.DeepEqual(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("ListDecks() = %v, want %v", got, want)
 	}
 }
@@ -45,12 +44,12 @@ func TestListNoteTemplateMetadata(t *testing.T) {
 			return nil, errors.New("unexpected action")
 		}
 	})))
-	templates, err := client.ListNoteTemplates(context.Background())
-	if err != nil || !reflect.DeepEqual(templates, []string{"Basic"}) {
+	templates, err := client.ListNoteTemplates(t.Context())
+	if err != nil || !slices.Equal(templates, []string{"Basic"}) {
 		t.Fatalf("templates=%v error=%v", templates, err)
 	}
-	fields, err := client.ListTemplateFields(context.Background(), "Basic")
-	if err != nil || !reflect.DeepEqual(fields, []string{"Front", "Back"}) {
+	fields, err := client.ListTemplateFields(t.Context(), "Basic")
+	if err != nil || !slices.Equal(fields, []string{"Front", "Back"}) {
 		t.Fatalf("fields=%v error=%v", fields, err)
 	}
 }
@@ -69,11 +68,11 @@ func TestFindNoteIDs(t *testing.T) {
 		return []int64{42}
 	})
 
-	got, err := client.FindNoteIDs(context.Background(), `deck:"Japanese Core" Front:re:^猫$`)
+	got, err := client.FindNoteIDs(t.Context(), `deck:"Japanese Core" Front:re:^猫$`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []int64{42}) {
+	if !slices.Equal(got, []int64{42}) {
 		t.Fatalf("unexpected IDs: %+v", got)
 	}
 }
@@ -86,13 +85,13 @@ func TestNotesInfo(t *testing.T) {
 		params := decodeParams[struct {
 			Notes []int64 `json:"notes"`
 		}](t, got.Params)
-		if !reflect.DeepEqual(params.Notes, []int64{42}) {
+		if !slices.Equal(params.Notes, []int64{42}) {
 			t.Fatalf("notes = %v", params.Notes)
 		}
 		return []Note{{ID: 42, ModelName: "Basic", Fields: map[string]Field{"Front": {Value: "猫", Order: 0}}}}
 	})
 
-	got, err := client.NotesInfo(context.Background(), []int64{42})
+	got, err := client.NotesInfo(t.Context(), []int64{42})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +105,7 @@ func TestNotesInfoEmptySkipsRequest(t *testing.T) {
 		t.Fatalf("unexpected action %q", got.Action)
 		return nil
 	})
-	got, err := client.NotesInfo(context.Background(), nil)
+	got, err := client.NotesInfo(t.Context(), nil)
 	if err != nil || got == nil || len(got) != 0 {
 		t.Fatalf("NotesInfo() = %#v, %v", got, err)
 	}
@@ -128,14 +127,14 @@ func TestUpdateNotes(t *testing.T) {
 		return nil
 	})
 
-	err := client.UpdateNotes(context.Background(), []NoteUpdate{
+	err := client.UpdateNotes(t.Context(), []NoteUpdate{
 		{ID: 1, Fields: map[string]string{"Front": "one"}},
 		{ID: 2, Fields: map[string]string{"Back": "two"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(ids, []int64{1, 2}) {
+	if !slices.Equal(ids, []int64{1, 2}) {
 		t.Fatalf("updated IDs = %v", ids)
 	}
 }
@@ -166,7 +165,7 @@ func TestStoreMediaFile(t *testing.T) {
 		return jsonResponse(`{"result":"_anki-tts.mp3","error":null}`), nil
 	})))
 
-	filename, err := client.StoreMediaFile(context.Background(), "_anki-tts.mp3", []byte("audio"))
+	filename, err := client.StoreMediaFile(t.Context(), "_anki-tts.mp3", []byte("audio"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,10 +176,10 @@ func TestStoreMediaFile(t *testing.T) {
 
 func TestStoreMediaFileValidation(t *testing.T) {
 	client := NewClient()
-	if _, err := client.StoreMediaFile(context.Background(), "../audio.mp3", []byte("audio")); err == nil {
+	if _, err := client.StoreMediaFile(t.Context(), "../audio.mp3", []byte("audio")); err == nil {
 		t.Fatal("expected invalid filename error")
 	}
-	if _, err := client.StoreMediaFile(context.Background(), "audio.mp3", nil); err == nil {
+	if _, err := client.StoreMediaFile(t.Context(), "audio.mp3", nil); err == nil {
 		t.Fatal("expected empty data error")
 	}
 }
@@ -189,7 +188,7 @@ func TestAnkiConnectError(t *testing.T) {
 	client := NewClient(WithHTTPClient(doerFunc(func(*http.Request) (*http.Response, error) {
 		return jsonResponse(`{"result":null,"error":"collection unavailable"}`), nil
 	})))
-	_, err := client.ListDecks(context.Background())
+	_, err := client.ListDecks(t.Context())
 	if err == nil || err.Error() != "list decks: collection unavailable" {
 		t.Fatalf("error = %v", err)
 	}

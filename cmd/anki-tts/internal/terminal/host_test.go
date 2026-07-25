@@ -12,7 +12,7 @@ import (
 )
 
 func TestScreenHostPreservesChildViewAndRemovesStepCounter(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	host := newScreenHost(
 		ctx,
@@ -49,7 +49,7 @@ func TestScreenHostPreservesChildViewAndRemovesStepCounter(t *testing.T) {
 }
 
 func TestScreenHostCanForceAlternateScreen(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	host := newScreenHost(
 		ctx,
@@ -66,7 +66,7 @@ func TestScreenHostCanForceAlternateScreen(t *testing.T) {
 }
 
 func TestScreenHostCompletesWithoutDiscardingFinalView(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	host := newScreenHost(
 		ctx,
@@ -91,7 +91,7 @@ func TestScreenHostCompletesWithoutDiscardingFinalView(t *testing.T) {
 }
 
 func TestPresentedWorkflowErrorSkipsErrorOverlay(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	host := newScreenHost(
 		ctx,
@@ -116,7 +116,7 @@ func TestPresentedWorkflowErrorSkipsErrorOverlay(t *testing.T) {
 }
 
 func TestScreenHostPreservesBatchExecutionCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	host := newScreenHost(
 		ctx,
@@ -141,7 +141,7 @@ func TestScreenHostPreservesBatchExecutionCancellation(t *testing.T) {
 
 func TestRunTerminalReturnsPresentedWorkflowError(t *testing.T) {
 	want := errors.New("batch failed")
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	var output bytes.Buffer
 

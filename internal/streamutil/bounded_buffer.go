@@ -24,10 +24,7 @@ func (b *BoundedBuffer) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	remaining := b.limit - b.buffer.Len()
 	if remaining > 0 {
-		chunk := p
-		if len(chunk) > remaining {
-			chunk = chunk[:remaining]
-		}
+		chunk := p[:min(len(p), remaining)]
 		_, _ = b.buffer.Write(chunk)
 	}
 	if len(p) > remaining {

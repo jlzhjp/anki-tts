@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"slices"
 	"strings"
 
 	"jlzhjp.dev/ankitts/anki"
@@ -103,11 +104,10 @@ func New(client AnkiClient, services *ServiceContainer, processors []AudioProces
 			return nil, fmt.Errorf("pipeline stage %q has no configuration", name)
 		}
 	}
-	configCopy := make(pipeline.Config, len(config))
-	maps.Copy(configCopy, config)
+	configCopy := maps.Clone(config)
 	return &Application{
 		anki: client, services: services,
-		processors: append([]AudioProcessor(nil), processors...), config: configCopy,
+		processors: slices.Clone(processors), config: configCopy,
 	}, nil
 }
 
@@ -138,7 +138,7 @@ func (a *Application) Prepare(request GenerationRequest) (Plan, error) {
 	}
 
 	jobs := make([]preparedJob, 0)
-	var invalid []string
+	var invalid []error
 	for result := range request.Notes {
 		if result.Err != nil {
 			return Plan{}, result.Err
@@ -146,21 +146,21 @@ func (a *Application) Prepare(request GenerationRequest) (Plan, error) {
 		note := result.Note
 		source, ok := note.Fields[request.SourceField]
 		if !ok {
-			invalid = append(invalid, fmt.Sprintf("note %d: missing source field %q", note.ID, request.SourceField))
+			invalid = append(invalid, fmt.Errorf("note %d: missing source field %q", note.ID, request.SourceField))
 			continue
 		}
 		destination, ok := note.Fields[request.DestinationField]
 		if !ok {
-			invalid = append(invalid, fmt.Sprintf("note %d: missing destination field %q", note.ID, request.DestinationField))
+			invalid = append(invalid, fmt.Errorf("note %d: missing destination field %q", note.ID, request.DestinationField))
 			continue
 		}
 		text, err := textutil.FromHTML(source.Value)
 		if err != nil {
-			invalid = append(invalid, fmt.Sprintf("note %d: prepare source field: %v", note.ID, err))
+			invalid = append(invalid, fmt.Errorf("note %d: prepare source field: %w", note.ID, err))
 			continue
 		}
 		if strings.TrimSpace(text) == "" {
-			invalid = append(invalid, fmt.Sprintf("note %d: source field %q has no speakable text", note.ID, request.SourceField))
+			invalid = append(invalid, fmt.Errorf("note %d: source field %q has no speakable text", note.ID, request.SourceField))
 			continue
 		}
 		jobs = append(jobs, preparedJob{
@@ -169,7 +169,7 @@ func (a *Application) Prepare(request GenerationRequest) (Plan, error) {
 		})
 	}
 	if len(invalid) > 0 {
-		return Plan{}, fmt.Errorf("selected notes cannot be processed:\n  %s", strings.Join(invalid, "\n  "))
+		return Plan{}, fmt.Errorf("selected notes cannot be processed: %w", errors.Join(invalid...))
 	}
 	return Plan{jobs: jobs, serviceName: request.Service}, nil
 }

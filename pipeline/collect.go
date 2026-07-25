@@ -27,9 +27,7 @@ func Collect[T any](ctx context.Context, input Stream[T], observer Observer) ([]
 			Index: current.index, Value: current.value,
 			Stage: current.stage, Err: current.failure,
 		}
-		if current.index > maximumIndex {
-			maximumIndex = current.index
-		}
+		maximumIndex = max(maximumIndex, current.index)
 	}
 	results := make([]Result[T], maximumIndex+1)
 	for index, result := range resultsByIndex {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ func TestGenerateStoresAndUpdates(t *testing.T) {
 	client := &fakeAnki{}
 	provider := &fakeTTS{voice: voice("audio bytes", "mp3")}
 	service := newTestApplication(t, client, provider, nil)
-	result, err := executeOne(context.Background(), service, spec())
+	result, err := executeOne(t.Context(), service, spec())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +46,7 @@ func TestTransformationDeterminesUploadedMedia(t *testing.T) {
 	provider := &fakeTTS{voice: voice("provider audio", "wav")}
 	transformer := &fakeTransformer{output: "transformed audio", format: "mp3"}
 	service := newTestApplication(t, client, provider, transformer)
-	_, err := executeOne(context.Background(), service, spec())
+	_, err := executeOne(t.Context(), service, spec())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func TestProgressUsesConfiguredComponentNames(t *testing.T) {
 	var stages []string
 	var descriptions []string
 	var completed int
-	_, err = app.Execute(context.Background(), plan, ExecuteOptions{Progress: ProgressReporterFunc(func(event ProgressEvent) {
+	_, err = app.Execute(t.Context(), plan, ExecuteOptions{Progress: ProgressReporterFunc(func(event ProgressEvent) {
 		if event.Kind == ProgressStarted {
 			stages = append(stages, event.Stage)
 		}
@@ -120,7 +121,7 @@ func TestMultipleAudioProcessorsRunInRegistrationOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executeOne(context.Background(), app, spec()); err != nil {
+	if _, err := executeOne(t.Context(), app, spec()); err != nil {
 		t.Fatal(err)
 	}
 	if got := string(client.mediaData); got != "audio-first-second" {
@@ -148,7 +149,7 @@ func TestFailuresBeforeUploadLeaveAnkiUnchanged(t *testing.T) {
 			if test.name == "empty source" {
 				req = specWithSource("<br>")
 			}
-			_, err := executeOne(context.Background(), service, req)
+			_, err := executeOne(t.Context(), service, req)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error=%v want containing %q", err, test.want)
 			}
@@ -163,7 +164,7 @@ func TestCostFailureIsNonFatal(t *testing.T) {
 	client := &fakeAnki{}
 	provider := &fakeTTS{voice: &fakeVoice{ReadCloser: io.NopCloser(strings.NewReader("audio")), format: "mp3", costErr: errors.New("cost unavailable")}}
 	service := newTestApplication(t, client, provider, nil)
-	result, err := executeOne(context.Background(), service, spec())
+	result, err := executeOne(t.Context(), service, spec())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +190,7 @@ func TestFinalAudioValidationAndClosure(t *testing.T) {
 			voice := &fakeVoice{ReadCloser: io.NopCloser(bytes.NewReader(test.data)), format: test.format}
 			provider := &fakeTTS{voice: voice}
 			service := newTestApplication(t, client, provider, nil)
-			_, err := executeOne(context.Background(), service, spec())
+			_, err := executeOne(t.Context(), service, spec())
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error=%v want containing %q", err, test.want)
 			}
@@ -218,7 +219,7 @@ func TestNoteUpdateFailureReportsStoredMedia(t *testing.T) {
 	client := &fakeAnki{updateErr: errors.New("update failed")}
 	provider := &fakeTTS{voice: voice("audio", "mp3")}
 	service := newTestApplication(t, client, provider, nil)
-	_, err := executeOne(context.Background(), service, spec())
+	_, err := executeOne(t.Context(), service, spec())
 	if err == nil || !strings.Contains(err.Error(), "was stored") || client.storeCalls != 1 {
 		t.Fatalf("error=%v stores=%d", err, client.storeCalls)
 	}
@@ -235,7 +236,7 @@ func TestAnkiUpdateRetryDoesNotRepeatStoredMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := executeOne(context.Background(), app, spec()); err != nil {
+	if _, err := executeOne(t.Context(), app, spec()); err != nil {
 		t.Fatal(err)
 	}
 	if client.storeCalls != 1 || client.updateCalls != 3 {
@@ -244,7 +245,7 @@ func TestAnkiUpdateRetryDoesNotRepeatStoredMedia(t *testing.T) {
 }
 
 func TestCancellationAfterUploadCompletesNoteUpdate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	client := &fakeAnki{afterStore: cancel}
 	provider := &fakeTTS{voice: voice("audio", "mp3")}
 	app := newTestApplication(t, client, provider, nil)
@@ -272,7 +273,7 @@ func TestCancellationAfterUploadCompletesNoteUpdate(t *testing.T) {
 }
 
 func TestCancellationMarksNotesThatNeverEnteredPipeline(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	client := &fakeAnki{}
 	services := container(t, cancelingTTS{cancel: cancel})
 	config := testPipelineConfig(false)
@@ -400,7 +401,7 @@ func (*fakeAnki) NotesInfo(context.Context, []int64) ([]anki.Note, error) { retu
 func (f *fakeAnki) StoreMediaFile(_ context.Context, filename string, data []byte) (string, error) {
 	f.storeCalls++
 	f.mediaFilename = filename
-	f.mediaData = append([]byte(nil), data...)
+	f.mediaData = slices.Clone(data)
 	if f.afterStore != nil {
 		f.afterStore()
 	}

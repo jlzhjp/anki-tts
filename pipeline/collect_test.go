@@ -1,12 +1,9 @@
 package pipeline
 
-import (
-	"context"
-	"testing"
-)
+import "testing"
 
 func TestCollectRejectsUninitializedStream(t *testing.T) {
-	if _, err := Collect(context.Background(), Stream[int]{}, nil); err == nil {
+	if _, err := Collect(t.Context(), Stream[int]{}, nil); err == nil {
 		t.Fatal("expected uninitialized stream error")
 	}
 }

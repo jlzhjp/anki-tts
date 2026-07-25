@@ -2,11 +2,12 @@ package batch
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -103,9 +104,9 @@ func reportBatchResult(
 	if _, err := fmt.Fprintf(output, "\nSummary: %d succeeded, %d failed.\n", succeeded, len(failures)); err != nil {
 		return fmt.Errorf("write batch summary: %w", err)
 	}
-	ordered := append([]ankitts.ItemResult(nil), result.Items...)
-	sort.Slice(ordered, func(i, j int) bool {
-		return ordered[i].NoteID < ordered[j].NoteID
+	ordered := slices.Clone(result.Items)
+	slices.SortFunc(ordered, func(a, b ankitts.ItemResult) int {
+		return cmp.Compare(a.NoteID, b.NoteID)
 	})
 	for _, item := range ordered {
 		if item.Err != nil {

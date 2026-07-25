@@ -48,7 +48,7 @@ func (a *Application) SearchNotes(ctx context.Context, query NoteQuery) (NoteSel
 	if query.Limit > 0 && len(ids) > query.Limit {
 		ids = ids[:query.Limit]
 	}
-	return NoteSelection{IDs: append([]int64(nil), ids...)}, nil
+	return NoteSelection{IDs: slices.Clone(ids)}, nil
 }
 
 // Notes lazily retrieves complete note information in bounded batches.
@@ -57,7 +57,7 @@ func (a *Application) Notes(
 	selection NoteSelection,
 	options NoteLoadOptions,
 ) iter.Seq[NoteResult] {
-	ids := append([]int64(nil), selection.IDs...)
+	ids := slices.Clone(selection.IDs)
 	batchSize := options.BatchSize
 	if batchSize == 0 {
 		batchSize = defaultNoteBatchSize
@@ -97,7 +97,7 @@ func (a *Application) Notes(
 
 // NoteResults returns an iterator over an in-memory note snapshot.
 func NoteResults(notes ...anki.Note) iter.Seq[NoteResult] {
-	notes = append([]anki.Note(nil), notes...)
+	notes = slices.Clone(notes)
 	return func(yield func(NoteResult) bool) {
 		for _, note := range notes {
 			if !yield(NoteResult{Note: note}) {

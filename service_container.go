@@ -3,7 +3,8 @@ package ankitts
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -43,12 +44,7 @@ func (c *ServiceContainer) Names() []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	names := make([]string, 0, len(c.services))
-	for name := range c.services {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(c.services))
 }
 
 func (c *ServiceContainer) get(name string) (Service, bool) {

@@ -1,8 +1,10 @@
 package pipeline
 
+import "slices"
+
 // FromSlice creates a lazy source from a snapshot of values.
 func FromSlice[T any](values []T) Stream[T] {
-	values = append([]T(nil), values...)
+	values = slices.Clone(values)
 	return Stream[T]{start: func(run *execution) <-chan entry[T] {
 		output := make(chan entry[T])
 		go func() {

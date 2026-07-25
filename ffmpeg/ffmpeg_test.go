@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -20,7 +20,7 @@ func TestTransformStreamsAudio(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := &trackedReadCloser{Reader: strings.NewReader("provider audio")}
-	voice, err := transformer.Transform(context.Background(), &testVoice{
+	voice, err := transformer.Transform(t.Context(), &testVoice{
 		ReadCloser: input,
 		mediaType:  "audio/wav",
 		format:     "wav",
@@ -36,7 +36,7 @@ func TestTransformStreamsAudio(t *testing.T) {
 		t.Fatalf("path = %q", runner.path)
 	}
 	wantArgs := []string{"-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-codec:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", "pipe:1"}
-	if !reflect.DeepEqual(runner.args, wantArgs) {
+	if !slices.Equal(runner.args, wantArgs) {
 		t.Fatalf("args = %q, want %q", runner.args, wantArgs)
 	}
 	if string(runner.input) != "provider audio" {
@@ -55,7 +55,7 @@ func TestTransformStreamsAudio(t *testing.T) {
 	if !input.closed {
 		t.Fatal("input stream was not closed")
 	}
-	cost, err := voice.LoadCost(context.Background())
+	cost, err := voice.LoadCost(t.Context())
 	if err != nil || cost != 0.0025 {
 		t.Fatalf("delegated cost = %v, error = %v", cost, err)
 	}
@@ -67,7 +67,7 @@ func TestTransformSeparatesMuxerFromExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	voice, err := transformer.Transform(context.Background(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
+	voice, err := transformer.Transform(t.Context(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestTransformErrors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			if test.cancel {
 				cancel()
 			} else {
@@ -143,7 +143,7 @@ func TestOutputStreamCloseTerminatesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	voice, err := transformer.Transform(context.Background(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
+	voice, err := transformer.Transform(t.Context(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestTransformBoundsStderr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	voice, err := transformer.Transform(context.Background(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
+	voice, err := transformer.Transform(t.Context(), &testVoice{ReadCloser: io.NopCloser(strings.NewReader("input"))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func (f *fakeRunner) LookPath(string) (string, error) {
 
 func (f *fakeRunner) Start(_ context.Context, path string, args []string, stdin io.Reader, stderr io.Writer) (RunningCommand, error) {
 	f.path = path
-	f.args = append([]string(nil), args...)
+	f.args = slices.Clone(args)
 	input, err := io.ReadAll(stdin)
 	if err != nil {
 		return nil, err

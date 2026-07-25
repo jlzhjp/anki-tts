@@ -3,6 +3,7 @@ package batch
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,7 +31,7 @@ func confirm(
 	display.Resume = previous != nil
 	if previous == nil {
 		previous = &confirmationScreen{
-			noteIDs:   append([]int64(nil), noteIDs...),
+			noteIDs:   slices.Clone(noteIDs),
 			overwrite: overwrite,
 			height:    24,
 		}

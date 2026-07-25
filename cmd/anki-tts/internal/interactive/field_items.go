@@ -1,7 +1,8 @@
 package interactive
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -22,11 +23,11 @@ func fieldListItems(note anki.Note, nonEmpty bool) []list.Item {
 		}
 		fields = append(fields, namedField{name: name, field: field})
 	}
-	sort.Slice(fields, func(i, j int) bool {
-		if fields[i].field.Order == fields[j].field.Order {
-			return fields[i].name < fields[j].name
-		}
-		return fields[i].field.Order < fields[j].field.Order
+	slices.SortFunc(fields, func(a, b namedField) int {
+		return cmp.Or(
+			cmp.Compare(a.field.Order, b.field.Order),
+			cmp.Compare(a.name, b.name),
+		)
 	})
 	items := make([]list.Item, 0, len(fields))
 	for _, field := range fields {

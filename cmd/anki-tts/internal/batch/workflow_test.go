@@ -1,7 +1,6 @@
 package batch
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -44,7 +43,7 @@ func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
 	}
 
 	result := Run(
-		context.Background(),
+		t.Context(),
 		client,
 		app,
 		Options{FromField: "Front", ToField: "Audio", Service: "Test"},
@@ -81,7 +80,7 @@ func TestBatchWorkflowYesSkipsConfirmations(t *testing.T) {
 	}
 
 	result := Run(
-		context.Background(),
+		t.Context(),
 		client,
 		app,
 		Options{FromField: "Front", ToField: "Audio", Service: "Test", Yes: true},
@@ -102,7 +101,7 @@ func TestBatchWorkflowRejectionSkipsNoteDetails(t *testing.T) {
 		return false, nil
 	}}
 	result := Run(
-		context.Background(),
+		t.Context(),
 		client,
 		app,
 		Options{FromField: "Front", ToField: "Audio", Service: "Test"},

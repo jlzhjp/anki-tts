@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
+	"slices"
 	"testing"
 
 	"jlzhjp.dev/ankitts/anki"
@@ -14,7 +14,7 @@ import (
 func TestSearchNotesPassesNativeFilterAndLimitsDeterministically(t *testing.T) {
 	client := &selectionAnki{ids: []int64{30, 5, 30, 20, 10}}
 	app := newSelectionApplication(t, client)
-	selection, err := app.SearchNotes(context.Background(), NoteQuery{
+	selection, err := app.SearchNotes(t.Context(), NoteQuery{
 		Filter: `deck:Japanese note:Basic`,
 		Limit:  3,
 	})
@@ -24,14 +24,14 @@ func TestSearchNotesPassesNativeFilterAndLimitsDeterministically(t *testing.T) {
 	if client.filter != `deck:Japanese note:Basic` {
 		t.Fatalf("filter=%q", client.filter)
 	}
-	if !reflect.DeepEqual(selection.IDs, []int64{5, 10, 20}) {
+	if !slices.Equal(selection.IDs, []int64{5, 10, 20}) {
 		t.Fatalf("IDs=%v", selection.IDs)
 	}
 }
 
 func TestSearchNotesRejectsNegativeLimit(t *testing.T) {
 	app := newSelectionApplication(t, &selectionAnki{})
-	if _, err := app.SearchNotes(context.Background(), NoteQuery{Limit: -1}); err == nil {
+	if _, err := app.SearchNotes(t.Context(), NoteQuery{Limit: -1}); err == nil {
 		t.Fatal("negative limit was accepted")
 	}
 }
@@ -42,7 +42,7 @@ func TestNotesLoadsLazilyInStableBatches(t *testing.T) {
 	}}
 	app := newSelectionApplication(t, client)
 	sequence := app.Notes(
-		context.Background(),
+		t.Context(),
 		NoteSelection{IDs: []int64{1, 2, 3, 4, 5}},
 		NoteLoadOptions{BatchSize: 2},
 	)
@@ -60,10 +60,10 @@ func TestNotesLoadsLazilyInStableBatches(t *testing.T) {
 			break
 		}
 	}
-	if !reflect.DeepEqual(got, []int64{1, 2, 3}) {
+	if !slices.Equal(got, []int64{1, 2, 3}) {
 		t.Fatalf("IDs=%v", got)
 	}
-	if !reflect.DeepEqual(client.batches, [][]int64{{1, 2}, {3, 4}}) {
+	if !slices.EqualFunc(client.batches, [][]int64{{1, 2}, {3, 4}}, slices.Equal) {
 		t.Fatalf("batches=%v", client.batches)
 	}
 }
@@ -74,7 +74,7 @@ func TestNotesYieldsOneTerminalError(t *testing.T) {
 	app := newSelectionApplication(t, client)
 	var results []NoteResult
 	for result := range app.Notes(
-		context.Background(),
+		t.Context(),
 		NoteSelection{IDs: []int64{1, 2}},
 		NoteLoadOptions{BatchSize: 1},
 	) {
@@ -90,7 +90,7 @@ func TestNotesRejectsNegativeBatchSizeWithoutCallingAnki(t *testing.T) {
 	app := newSelectionApplication(t, client)
 	var results []NoteResult
 	for result := range app.Notes(
-		context.Background(),
+		t.Context(),
 		NoteSelection{IDs: []int64{1}},
 		NoteLoadOptions{BatchSize: -1},
 	) {
@@ -125,11 +125,11 @@ type selectionAnki struct {
 
 func (s *selectionAnki) FindNoteIDs(_ context.Context, filter string) ([]int64, error) {
 	s.filter = filter
-	return append([]int64(nil), s.ids...), nil
+	return slices.Clone(s.ids), nil
 }
 
 func (s *selectionAnki) NotesInfo(_ context.Context, ids []int64) ([]anki.Note, error) {
-	s.batches = append(s.batches, append([]int64(nil), ids...))
+	s.batches = append(s.batches, slices.Clone(ids))
 	if s.infoErr != nil {
 		return nil, s.infoErr
 	}

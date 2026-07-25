@@ -13,7 +13,7 @@ import (
 func TestNoteScreenLoadsOneConsumerWindowAtATime(t *testing.T) {
 	source := &windownoteSource{notes: testWindowNotes(120)}
 	screen := newNoteScreen(
-		context.Background(),
+		t.Context(),
 		source,
 		noteOptions{Query: ankitts.NoteQuery{Filter: "tag:tts"}},
 	)
@@ -54,8 +54,8 @@ func TestNoteScreenRefreshesOnlySelectedNote(t *testing.T) {
 			"Front": {Value: "before"},
 		},
 	}}}
-	screen := newNoteScreen(context.Background(), source, noteOptions{})
-	screen.notes = append([]anki.Note(nil), source.notes...)
+	screen := newNoteScreen(t.Context(), source, noteOptions{})
+	screen.notes = slices.Clone(source.notes)
 	source.notes[0] = anki.Note{
 		ID: 1,
 		Fields: map[string]anki.Field{

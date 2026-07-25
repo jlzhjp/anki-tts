@@ -115,7 +115,7 @@ func TestBatchConfirmationAcceptsAndRejects(t *testing.T) {
 func TestBatchStepFunctionsConstructTypedScreens(t *testing.T) {
 	confirmationClient := &fakeClient{value: true}
 	accepted, confirmation, err := confirm(
-		context.Background(),
+		t.Context(),
 		confirmationClient,
 		[]int64{1},
 		false,
@@ -133,7 +133,7 @@ func TestBatchStepFunctionsConstructTypedScreens(t *testing.T) {
 
 	generationClient := &fakeClient{value: outcome{}}
 	_, err = generate(
-		context.Background(),
+		t.Context(),
 		generationClient,
 		&fakeBatchExecution{},
 		ankitts.Plan{},
@@ -154,7 +154,7 @@ func TestBatchGenerationExecutesWithProgressReporter(t *testing.T) {
 		},
 	}
 	screen := &generationScreen{
-		ctx:      context.Background(),
+		ctx:      t.Context(),
 		app:      app,
 		events:   make(chan ankitts.ProgressEvent, 1),
 		progress: make(map[int]noteProgress),

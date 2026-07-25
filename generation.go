@@ -278,13 +278,13 @@ func readVoice(ctx context.Context, voice Voice) ([]byte, string, string, error)
 		_ = voice.Close()
 		return nil, "", "", fmt.Errorf("audio pipeline returned invalid format %q", voice.Format())
 	}
-	var closeOnce sync.Once
-	var closeErr error
-	closeVoice := func() { closeOnce.Do(func() { closeErr = voice.Close() }) }
-	stopCancellationClose := context.AfterFunc(ctx, closeVoice)
+	closeVoice := sync.OnceValue(voice.Close)
+	stopCancellationClose := context.AfterFunc(ctx, func() {
+		_ = closeVoice()
+	})
 	data, readErr := io.ReadAll(io.LimitReader(voice, maxFinalAudioSize+1))
 	stopCancellationClose()
-	closeVoice()
+	closeErr := closeVoice()
 	if readErr != nil {
 		return nil, "", "", fmt.Errorf("read audio: %w", readErr)
 	}

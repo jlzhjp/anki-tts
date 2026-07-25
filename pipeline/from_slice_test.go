@@ -24,7 +24,7 @@ func TestFromSliceStopsAfterCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct {
 		results []Result[int]
 		err     error

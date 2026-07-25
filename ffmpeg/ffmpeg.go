@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"jlzhjp.dev/ankitts"
@@ -74,7 +75,7 @@ func NewWithRunner(config Config, runner CommandRunner, maxOutputSize int64) (*T
 	return &Transformer{
 		path:          path,
 		format:        format,
-		args:          append([]string(nil), config.Args...),
+		args:          slices.Clone(config.Args),
 		runner:        runner,
 		maxOutputSize: maxOutputSize,
 	}, nil

@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
-	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -42,7 +42,7 @@ func TestRetryRetriesOnlyWrappedOperation(t *testing.T) {
 	}
 	var eventsMu sync.Mutex
 	var events []Event
-	_, err = Collect(context.Background(), stream, ObserverFunc(func(event Event) {
+	_, err = Collect(t.Context(), stream, ObserverFunc(func(event Event) {
 		eventsMu.Lock()
 		defer eventsMu.Unlock()
 		if event.Operation == "update" {
@@ -64,10 +64,10 @@ func TestRetryRetriesOnlyWrappedOperation(t *testing.T) {
 			t.Fatalf("scoped event=%+v", event)
 		}
 	}
-	if want := []EventKind{Started, Retrying, Started, Retrying, Started, Completed}; !reflect.DeepEqual(kinds, want) {
+	if want := []EventKind{Started, Retrying, Started, Retrying, Started, Completed}; !slices.Equal(kinds, want) {
 		t.Fatalf("event kinds=%v want=%v", kinds, want)
 	}
-	if want := []int{1, 1, 2, 2, 3, 3}; !reflect.DeepEqual(attempts, want) {
+	if want := []int{1, 1, 2, 2, 3, 3}; !slices.Equal(attempts, want) {
 		t.Fatalf("attempts=%v want=%v", attempts, want)
 	}
 }
@@ -90,7 +90,7 @@ func TestRetryCancellationDuringBackoffReportsLastAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	var eventsMu sync.Mutex
 	var events []Event
 	done := make(chan error, 1)
@@ -112,7 +112,7 @@ func TestRetryCancellationDuringBackoffReportsLastAttempt(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatalf("events=%+v", events)
 	}
-	if want := []EventKind{Started, Retrying, Failed}; !reflect.DeepEqual(
+	if want := []EventKind{Started, Retrying, Failed}; !slices.Equal(
 		[]EventKind{events[0].Kind, events[1].Kind, events[2].Kind},
 		want,
 	) {
@@ -135,7 +135,7 @@ func TestRetryCanceledBeforeFirstAttemptReportsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	var events []Event
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	ctx = context.WithValue(ctx, scopeContextKey{}, operationScope{
 		observer: ObserverFunc(func(event Event) { events = append(events, event) }),
 	})

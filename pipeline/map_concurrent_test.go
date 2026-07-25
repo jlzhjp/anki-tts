@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,7 +41,7 @@ func TestMapConcurrentChangesTypesAndPreservesInputOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, err := Collect(context.Background(), stored, nil)
+	results, err := Collect(t.Context(), stored, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestMapConcurrentClosesEmptyWorkerPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, err := Collect(context.Background(), stream, nil)
+	results, err := Collect(t.Context(), stream, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestMapConcurrentBypassesRemainingStagesAfterFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, err := Collect(context.Background(), second, nil)
+	results, err := Collect(t.Context(), second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestMapConcurrentWaitsForInFlightTransforms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		_, err := Collect(ctx, stream, nil)
@@ -158,11 +158,11 @@ func TestMapConcurrentAllowsRepeatedStageLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, err := Collect(context.Background(), second, nil)
+	results, err := Collect(t.Context(), second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"store", "update"}; !reflect.DeepEqual(results[0].Value.stages, want) {
+	if want := []string{"store", "update"}; !slices.Equal(results[0].Value.stages, want) {
 		t.Fatalf("stages=%v want=%v", results[0].Value.stages, want)
 	}
 }

@@ -1,7 +1,6 @@
 package openrouter
 
 import (
-	"context"
 	"net/http"
 	"testing"
 )
@@ -23,14 +22,14 @@ func TestOpenRouterCostCalculator(t *testing.T) {
 		return response(http.StatusOK, "application/json", []byte(`{"data":[{"id":"model","pricing":{"prompt":"0.000625","completion":"0"}}]}`)), nil
 	}))
 
-	cost, err := calculator.Calculate(context.Background(), "猫a", "model")
+	cost, err := calculator.Calculate(t.Context(), "猫a", "model")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cost != 0.00125 {
 		t.Fatalf("cost = %v", cost)
 	}
-	if _, err := calculator.Calculate(context.Background(), "another sentence", "model"); err != nil {
+	if _, err := calculator.Calculate(t.Context(), "another sentence", "model"); err != nil {
 		t.Fatal(err)
 	}
 	if modelsCalls != 1 {

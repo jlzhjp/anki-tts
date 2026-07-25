@@ -26,10 +26,8 @@ func MapConcurrent[I, O any](input Stream[I], stage string, concurrency int, tra
 		stageInput := input.start(run)
 		output := make(chan entry[O])
 		var workers sync.WaitGroup
-		workers.Add(concurrency)
 		for range concurrency {
-			go func() {
-				defer workers.Done()
+			workers.Go(func() {
 				for current := range stageInput {
 					next := entry[O]{index: current.index, stage: current.stage, failure: current.failure}
 					if current.failure == nil {
@@ -49,7 +47,7 @@ func MapConcurrent[I, O any](input Stream[I], stage string, concurrency int, tra
 					}
 					output <- next
 				}
-			}()
+			})
 		}
 		go func() {
 			workers.Wait()

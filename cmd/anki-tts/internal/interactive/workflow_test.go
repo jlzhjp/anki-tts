@@ -30,7 +30,7 @@ func TestInteractiveWorkflowSkipsConfiguredStagesAndLoopsNotes(t *testing.T) {
 	}
 
 	err := Run(
-		context.Background(),
+		t.Context(),
 		client,
 		app,
 		Options{
@@ -84,7 +84,7 @@ func TestInteractiveWorkflowBackUnwindsVisibleStages(t *testing.T) {
 	}
 
 	err := Run(
-		context.Background(),
+		t.Context(),
 		client,
 		app,
 		Options{
@@ -135,7 +135,7 @@ func TestInteractiveWorkflowBackSkipsConfiguredStages(t *testing.T) {
 	}
 
 	err := Run(
-		context.Background(),
+		t.Context(),
 		client,
 		app,
 		Options{
@@ -173,7 +173,7 @@ func TestInteractiveWorkflowUsesIterativeNoteCycle(t *testing.T) {
 	}
 
 	err := Run(
-		context.Background(),
+		t.Context(),
 		client,
 		app,
 		Options{
@@ -193,7 +193,7 @@ func TestInteractiveWorkflowUsesIterativeNoteCycle(t *testing.T) {
 
 func TestInteractiveWorkflowRejectsConfiguredUnknownService(t *testing.T) {
 	err := Run(
-		context.Background(),
+		t.Context(),
 		&scriptedClient{},
 		&workflowApplication{services: []string{"openrouter"}},
 		Options{Service: "missing"},

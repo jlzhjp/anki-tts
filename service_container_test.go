@@ -3,7 +3,7 @@ package ankitts
 import (
 	"context"
 	"errors"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -17,7 +17,7 @@ func TestServiceContainer(t *testing.T) {
 	if err := container.Add("Alpha", service); err != nil {
 		t.Fatal(err)
 	}
-	if names := container.Names(); !reflect.DeepEqual(names, []string{"Alpha", "Zulu"}) {
+	if names := container.Names(); !slices.Equal(names, []string{"Alpha", "Zulu"}) {
 		t.Fatalf("service names = %v", names)
 	}
 	if err := container.Add("Alpha", service); err == nil || !strings.Contains(err.Error(), "already registered") {
