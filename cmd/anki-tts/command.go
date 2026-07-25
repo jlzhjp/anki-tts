@@ -5,8 +5,7 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
-
-	"jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/ankitts"
 )
 
 type commandOptions struct {

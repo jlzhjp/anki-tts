@@ -55,8 +55,8 @@ func TestRetryRetriesOnlyWrappedOperation(t *testing.T) {
 	if storeCalls != 1 || updateCalls != 3 {
 		t.Fatalf("store calls=%d update calls=%d", storeCalls, updateCalls)
 	}
-	var kinds []EventKind
-	var attempts []int
+	kinds := make([]EventKind, 0, len(events))
+	attempts := make([]int, 0, len(events))
 	for _, event := range events {
 		kinds = append(kinds, event.Kind)
 		attempts = append(attempts, event.Attempt)

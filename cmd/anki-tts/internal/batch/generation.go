@@ -10,7 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/ankitts"
 )
 
 // executionApplication is the capability required by batch generation.
@@ -99,10 +99,9 @@ func (s *generationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		state.maxAttempts = msg.MaxAttempts
 		state.retryAt = msg.RetryAt
 		state.err = msg.Err
-		state.working =
-			msg.Kind == ankitts.ProgressStarted ||
-				msg.Kind == ankitts.ProgressUpdated ||
-				msg.Kind == ankitts.ProgressRetrying
+		state.working = msg.Kind == ankitts.ProgressStarted ||
+			msg.Kind == ankitts.ProgressUpdated ||
+			msg.Kind == ankitts.ProgressRetrying
 		if msg.Kind == ankitts.ProgressItemCompleted {
 			state.done = true
 			state.working = false
@@ -120,7 +119,7 @@ func (s *generationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		s.finished = true
 		s.result = msg.result
 		s.executionErr = msg.err
-		return s, complete(outcome{result: msg.result, err: msg.err})
+		return s, complete(outcome(msg))
 	}
 	return s, nil
 }
@@ -178,12 +177,13 @@ func (s *generationScreen) progressView() string {
 	failedNotes := make([]int, 0)
 	succeeded, failed := 0, 0
 	for index, state := range s.progress {
-		if state.done {
+		switch {
+		case state.done:
 			succeeded++
-		} else if state.err != nil && !state.working {
+		case state.err != nil && !state.working:
 			failed++
 			failedNotes = append(failedNotes, index)
-		} else if state.working {
+		case state.working:
 			active = append(active, index)
 		}
 	}

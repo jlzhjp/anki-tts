@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"testing"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
@@ -66,7 +66,7 @@ func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
 func TestBatchWorkflowYesSkipsConfirmations(t *testing.T) {
 	app, _, selection := preparedWorkflow(t, true)
 	client := &scriptedClient{}
-	client.prompt = func(screen screen, display display) (any, error) {
+	client.prompt = func(screen screen, _ display) (any, error) {
 		if preparation, ok := screen.(*preparationScreen); ok {
 			return preparation.prepare()
 		}

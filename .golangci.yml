@@ -1,0 +1,62 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    # official
+    - govet
+
+    # staticcheck suite
+    - staticcheck
+    - unused
+
+    # correctness
+    - errcheck
+    - ineffassign
+    - nilerr
+    - bodyclose
+    - contextcheck
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - forcetypeassert
+    - makezero
+    - nilnil
+
+    # bugs
+    - asciicheck
+    - bidichk
+    - copyloopvar
+    - durationcheck
+    - gocritic
+
+    # style
+    - revive
+    - misspell
+    - whitespace
+    - unconvert
+
+    # performance
+    - prealloc
+    - perfsprint
+
+    # modernization
+    - modernize
+
+    # security
+    - gosec
+
+    # tests
+    - testifylint
+    - tparallel
+
+  exclusions:
+    generated: lax
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports

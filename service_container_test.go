@@ -2,6 +2,7 @@ package ankitts
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,4 +27,6 @@ func TestServiceContainer(t *testing.T) {
 
 type containerFakeService struct{}
 
-func (containerFakeService) Generate(context.Context, Input) (Voice, error) { return nil, nil }
+func (containerFakeService) Generate(context.Context, Input) (Voice, error) {
+	return nil, errors.New("not implemented")
+}

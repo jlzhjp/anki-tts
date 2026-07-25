@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"maps"
 	"strings"
 
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/internal/textutil"
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/internal/textutil"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 const persistenceStage = "anki"
@@ -74,7 +75,7 @@ type Application struct {
 // New constructs an application from named components and their pipeline policies.
 func New(client AnkiClient, services *ServiceContainer, processors []AudioProcessor, config pipeline.Config) (*Application, error) {
 	if client == nil {
-		return nil, errors.New("Anki client is required")
+		return nil, errors.New("anki client is required")
 	}
 	if services == nil {
 		services = NewServiceContainer()
@@ -103,9 +104,7 @@ func New(client AnkiClient, services *ServiceContainer, processors []AudioProces
 		}
 	}
 	configCopy := make(pipeline.Config, len(config))
-	for name, stage := range config {
-		configCopy[name] = stage
-	}
+	maps.Copy(configCopy, config)
 	return &Application{
 		anki: client, services: services,
 		processors: append([]AudioProcessor(nil), processors...), config: configCopy,

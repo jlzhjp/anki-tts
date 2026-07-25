@@ -1,10 +1,11 @@
+// Package batch implements terminal and plain batch generation workflows.
 package batch
 
 import (
 	"context"
 	"iter"
 
-	"jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/ankitts"
 )
 
 // Application contains only the capabilities used by batch execution.

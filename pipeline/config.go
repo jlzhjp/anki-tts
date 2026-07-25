@@ -7,9 +7,12 @@ import (
 )
 
 const (
-	DefaultMaxAttempts    = 3
+	// DefaultMaxAttempts is the default total number of operation attempts.
+	DefaultMaxAttempts = 3
+	// DefaultInitialBackoff is the delay before the first retry.
 	DefaultInitialBackoff = 500 * time.Millisecond
-	DefaultMaxBackoff     = 5 * time.Second
+	// DefaultMaxBackoff caps exponential retry delays.
+	DefaultMaxBackoff = 5 * time.Second
 )
 
 // RetryConfig controls context-aware exponential retry backoff.

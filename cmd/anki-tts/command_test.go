@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 func TestBatchConfirmsOverwriteAndProcessesEveryNote(t *testing.T) {
@@ -136,6 +136,7 @@ func (b *batchAnki) FindNoteIDs(context.Context, string) ([]int64, error) {
 	}
 	return ids, nil
 }
+
 func (b *batchAnki) NotesInfo(_ context.Context, ids []int64) ([]anki.Note, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -150,9 +151,11 @@ func (b *batchAnki) NotesInfo(_ context.Context, ids []int64) ([]anki.Note, erro
 	}
 	return notes, nil
 }
+
 func (*batchAnki) StoreMediaFile(_ context.Context, filename string, _ []byte) (string, error) {
 	return filename, nil
 }
+
 func (b *batchAnki) UpdateNote(_ context.Context, update anki.NoteUpdate) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -164,12 +167,6 @@ func (b *batchAnki) updateCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.updates)
-}
-
-func (b *batchAnki) notesInfoCount() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.notesInfoCalls
 }
 
 type batchTTS struct{}

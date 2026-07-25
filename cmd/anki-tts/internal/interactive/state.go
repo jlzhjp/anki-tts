@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
 )
 
 type navigation uint8

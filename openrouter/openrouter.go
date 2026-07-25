@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/internal/streamutil"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/internal/streamutil"
 )
 
 const (
@@ -22,10 +22,10 @@ const (
 	defaultModelsEndpoint = "https://openrouter.ai/api/v1/models"
 	defaultVoice          = "alloy"
 	defaultFormat         = "mp3"
-	maxAudioSize          = 32 << 20 // 32 MiB
-	maxErrorBodySize      = 64 << 10 // 64 KiB
-	maxModelsResponseSize = 4 << 20  // 4 MiB
-	apiKeyEnvironment     = "OPENROUTER_API_KEY"
+	maxAudioSize          = 32 << 20             // 32 MiB
+	maxErrorBodySize      = 64 << 10             // 64 KiB
+	maxModelsResponseSize = 4 << 20              // 4 MiB
+	apiKeyEnvironment     = "OPENROUTER_API_KEY" // #nosec G101 -- this is an environment variable name, not a credential.
 )
 
 // HTTPClient is implemented by *http.Client.
@@ -185,7 +185,7 @@ func (s *service) Generate(ctx context.Context, input ankitts.Input) (ankitts.Vo
 		return nil, fmt.Errorf("generate OpenRouter speech: send request: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		return nil, openRouterError(resp, s.apiKey)
 	}
 	if resp.ContentLength > maxAudioSize {

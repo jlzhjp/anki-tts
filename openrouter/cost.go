@@ -65,7 +65,7 @@ func (c *openRouterCostCalculator) loadPricePerCharacter(ctx context.Context, mo
 	if err != nil {
 		return 0, fmt.Errorf("load OpenRouter TTS pricing: send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return 0, openRouterAPIError("load OpenRouter TTS pricing", resp, c.apiKey)
 	}

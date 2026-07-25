@@ -2,11 +2,12 @@ package ankitts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"slices"
 
-	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/ankitts/anki"
 )
 
 const defaultNoteBatchSize = 100
@@ -36,7 +37,7 @@ type NoteResult struct {
 // SearchNotes finds, deduplicates, sorts, and limits matching note IDs.
 func (a *Application) SearchNotes(ctx context.Context, query NoteQuery) (NoteSelection, error) {
 	if query.Limit < 0 {
-		return NoteSelection{}, fmt.Errorf("note limit must not be negative")
+		return NoteSelection{}, errors.New("note limit must not be negative")
 	}
 	ids, err := a.anki.FindNoteIDs(ctx, query.Filter)
 	if err != nil {
@@ -64,7 +65,7 @@ func (a *Application) Notes(
 
 	return func(yield func(NoteResult) bool) {
 		if batchSize < 0 {
-			yield(NoteResult{Err: fmt.Errorf("note batch size must not be negative")})
+			yield(NoteResult{Err: errors.New("note batch size must not be negative")})
 			return
 		}
 		for batchIDs := range slices.Chunk(ids, batchSize) {

@@ -34,6 +34,7 @@ func FromHTML(value string) (string, error) {
 					output.WriteByte('\n')
 				}
 			}
+		case html.ErrorNode, html.DocumentNode, html.CommentNode, html.DoctypeNode, html.RawNode:
 		}
 		for child := node.FirstChild; child != nil; child = child.NextSibling {
 			walk(child)

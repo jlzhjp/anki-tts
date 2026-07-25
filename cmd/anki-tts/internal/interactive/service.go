@@ -2,6 +2,7 @@ package interactive
 
 import (
 	"context"
+	"fmt"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -37,7 +38,11 @@ func (s *ttsServiceScreen) Init() tea.Cmd { return nil }
 func (s *ttsServiceScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok && key.String() == "enter" && !s.busy && !s.Filtering() {
 		if selected, ok := s.selected(); ok {
-			return s, complete(selected.value.(string))
+			value, ok := selected.value.(string)
+			if !ok {
+				return s, fail(fmt.Errorf("service selection has unexpected type %T", selected.value), nil)
+			}
+			return s, complete(value)
 		}
 	}
 	return s, s.update(message)

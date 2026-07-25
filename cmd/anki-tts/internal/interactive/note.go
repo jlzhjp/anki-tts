@@ -9,9 +9,9 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/internal/textutil"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/internal/textutil"
 )
 
 const (
@@ -181,7 +181,10 @@ func (s *noteScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.String() == "enter" && !s.busy && !s.Filtering() {
 			if selected, ok := s.selected(); ok {
-				candidate := selected.value.(noteCandidate)
+				candidate, ok := selected.value.(noteCandidate)
+				if !ok {
+					return s, fail(fmt.Errorf("note selection has unexpected type %T", selected.value), nil)
+				}
 				if candidate.invalid != "" {
 					return s, s.list.NewStatusMessage(candidate.invalid)
 				}
@@ -217,6 +220,8 @@ func (s *noteScreen) start() tea.Cmd {
 		if err != nil {
 			return noteStreamStartedMsg{err: err}
 		}
+		// #nosec G118 -- cancel is transferred through noteStreamStartedMsg and
+		// called by stopStream when the stream is replaced or the screen exits.
 		streamCtx, cancel := context.WithCancel(s.ctx)
 		sequence := s.source.Notes(
 			streamCtx,
@@ -324,6 +329,10 @@ func firstFieldValue(note anki.Note) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	value := fields[0].(listItem).description
+	field, ok := fields[0].(listItem)
+	if !ok {
+		return ""
+	}
+	value := field.description
 	return strings.ReplaceAll(value, "\n", " ")
 }

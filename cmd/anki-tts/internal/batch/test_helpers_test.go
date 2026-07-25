@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
 )
 
 type scriptedClient struct {

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/terminal"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/cmd/anki-tts/internal/terminal"
 )
 
 // Run executes the interactive note-at-a-time workflow.

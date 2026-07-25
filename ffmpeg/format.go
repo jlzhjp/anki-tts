@@ -9,13 +9,20 @@ import (
 type Format string
 
 const (
-	FormatAAC  Format = "aac"
+	// FormatAAC identifies raw AAC output.
+	FormatAAC Format = "aac"
+	// FormatFLAC identifies FLAC output.
 	FormatFLAC Format = "flac"
-	FormatM4A  Format = "m4a"
-	FormatMP3  Format = "mp3"
-	FormatOgg  Format = "ogg"
+	// FormatM4A identifies MPEG-4 audio output.
+	FormatM4A Format = "m4a"
+	// FormatMP3 identifies MP3 output.
+	FormatMP3 Format = "mp3"
+	// FormatOgg identifies Ogg output.
+	FormatOgg Format = "ogg"
+	// FormatOpus identifies Opus output.
 	FormatOpus Format = "opus"
-	FormatWAV  Format = "wav"
+	// FormatWAV identifies WAV output.
+	FormatWAV Format = "wav"
 )
 
 // ParseFormat parses a supported audio output format.
@@ -36,8 +43,10 @@ func (f Format) Muxer() string {
 		return "adts"
 	case FormatM4A:
 		return "ipod"
-	default:
+	case FormatFLAC, FormatMP3, FormatOgg, FormatOpus, FormatWAV:
 		return string(f)
+	default:
+		return ""
 	}
 }
 

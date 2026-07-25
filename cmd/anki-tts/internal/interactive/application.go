@@ -1,6 +1,7 @@
+// Package interactive implements the guided terminal generation workflow.
 package interactive
 
-import "jlzhjp.dev/anki-tts"
+import "jlzhjp.dev/ankitts"
 
 // Application contains only the capabilities used by the interactive workflow.
 type Application interface {

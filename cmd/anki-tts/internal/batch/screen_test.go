@@ -8,8 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/ankitts"
 )
 
 func TestBatchConfirmationChoosesAlternateScreenFromHeight(t *testing.T) {
@@ -58,7 +57,11 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 		RetryAt:     time.Now().Add(time.Second),
 		Err:         errors.New("rate limited"),
 	})
-	screen = updated.(*generationScreen)
+	var ok bool
+	screen, ok = updated.(*generationScreen)
+	if !ok {
+		t.Fatalf("updated model=%T", updated)
+	}
 	for _, want := range []string{
 		"note 1",
 		"Generating speech with test-model",
@@ -79,7 +82,10 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 			Items: []ankitts.ItemResult{{NoteID: 1}},
 		},
 	})
-	screen = updated.(*generationScreen)
+	screen, ok = updated.(*generationScreen)
+	if !ok {
+		t.Fatalf("updated model=%T", updated)
+	}
 	if cmd == nil {
 		t.Fatal("finished batch did not complete its workflow step")
 	}
@@ -97,11 +103,11 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 func TestBatchConfirmationAcceptsAndRejects(t *testing.T) {
 	screen := &confirmationScreen{}
 	_, accept := screen.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if msg := accept(); msg.(completedMsg).Value != true {
+	if msg, ok := accept().(completedMsg); !ok || msg.Value != true {
 		t.Fatalf("accept message=%+v", msg)
 	}
 	_, reject := screen.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	if msg := reject(); msg.(completedMsg).Value != false {
+	if msg, ok := reject().(completedMsg); !ok || msg.Value != false {
 		t.Fatalf("reject message=%+v", msg)
 	}
 }
@@ -154,7 +160,10 @@ func TestBatchGenerationExecutesWithProgressReporter(t *testing.T) {
 		progress: make(map[int]noteProgress),
 	}
 
-	finished := screen.execute()().(finishedMsg)
+	finished, ok := screen.execute()().(finishedMsg)
+	if !ok {
+		t.Fatal("execute did not return finishedMsg")
+	}
 
 	if finished.err != nil || len(finished.result.Items) != 1 {
 		t.Fatalf("finished=%+v", finished)

@@ -260,7 +260,7 @@ func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byt
 	if requestErr != nil {
 		return "", fmt.Errorf("store media file %q: send request: %w", filename, requestErr)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
 	if err != nil {
@@ -301,7 +301,7 @@ func (c *Client) invoke(ctx context.Context, action string, params, result any) 
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	limitedBody := io.LimitReader(resp.Body, maxResponseSize+1)
 	responseBody, err := io.ReadAll(limitedBody)

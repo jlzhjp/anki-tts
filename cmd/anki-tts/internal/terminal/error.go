@@ -1,3 +1,4 @@
+// Package terminal provides shared terminal UI infrastructure.
 package terminal
 
 import (
@@ -18,13 +19,21 @@ type ErrorScreen struct {
 	retry tea.Cmd
 }
 
+// NewErrorScreen constructs an error overlay with an optional retry command.
 func NewErrorScreen(err error, retry tea.Cmd) *ErrorScreen {
 	return &ErrorScreen{err: err, retry: retry}
 }
 
-func (s *ErrorScreen) Init() tea.Cmd    { return nil }
+// Init implements tea.Model.
+func (s *ErrorScreen) Init() tea.Cmd { return nil }
+
+// SetSize updates the screen size. ErrorScreen does not require dimensions.
 func (s *ErrorScreen) SetSize(int, int) {}
-func (s *ErrorScreen) Filtering() bool  { return false }
+
+// Filtering reports whether the screen is accepting filtered text input.
+func (s *ErrorScreen) Filtering() bool { return false }
+
+// Update handles retry and dismissal keys.
 func (s *ErrorScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok {
 		switch key.String() {
@@ -39,6 +48,7 @@ func (s *ErrorScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
+// View renders the error and its available actions.
 func (s *ErrorScreen) View() tea.View {
 	help := "Esc: back  q: quit"
 	if s.retry != nil {

@@ -6,8 +6,8 @@ import (
 
 	"charm.land/bubbles/v2/list"
 
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/internal/textutil"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/internal/textutil"
 )
 
 func fieldListItems(note anki.Note, nonEmpty bool) []list.Item {

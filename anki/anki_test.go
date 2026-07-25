@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"reflect"
@@ -41,7 +42,7 @@ func TestListNoteTemplateMetadata(t *testing.T) {
 			return jsonResponse(`{"result":["Front","Back"],"error":null}`), nil
 		default:
 			t.Fatalf("unexpected action %q", got.Action)
-			return nil, nil
+			return nil, errors.New("unexpected action")
 		}
 	})))
 	templates, err := client.ListNoteTemplates(context.Background())

@@ -1,7 +1,9 @@
+// Package main provides the anki-tts command-line application.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -10,10 +12,10 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/batch"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/interactive"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/terminal"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/cmd/anki-tts/internal/batch"
+	"jlzhjp.dev/ankitts/cmd/anki-tts/internal/interactive"
+	"jlzhjp.dev/ankitts/cmd/anki-tts/internal/terminal"
 )
 
 type application interface {
@@ -42,7 +44,7 @@ func runApplication(
 	output io.Writer,
 ) error {
 	if app == nil {
-		return fmt.Errorf("application is not configured")
+		return errors.New("application is not configured")
 	}
 	if options.Interactive {
 		return terminal.Run(ctx, input, output, true, func(ctx context.Context, client terminal.Client) terminal.Result {
@@ -65,7 +67,9 @@ func runApplication(
 		return err
 	}
 	if len(selection.IDs) == 0 {
-		fmt.Fprintln(output, "No notes matched the filter.")
+		if _, err := fmt.Fprintln(output, "No notes matched the filter."); err != nil {
+			return fmt.Errorf("write empty selection: %w", err)
+		}
 		return nil
 	}
 	batchOptions := batch.Options{

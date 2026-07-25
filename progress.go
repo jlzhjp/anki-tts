@@ -4,18 +4,24 @@ import (
 	"context"
 	"time"
 
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 // ProgressKind identifies the meaning of an application progress event.
 type ProgressKind uint8
 
 const (
+	// ProgressStarted indicates that a pipeline operation has begun.
 	ProgressStarted ProgressKind = iota
+	// ProgressUpdated indicates that an operation description changed.
 	ProgressUpdated
+	// ProgressRetrying indicates that a failed operation will be attempted again.
 	ProgressRetrying
+	// ProgressCompleted indicates that a pipeline operation succeeded.
 	ProgressCompleted
+	// ProgressFailed indicates that a pipeline operation exhausted its attempts.
 	ProgressFailed
+	// ProgressItemCompleted indicates that all work for an item succeeded.
 	ProgressItemCompleted
 )
 
@@ -43,6 +49,7 @@ type ProgressReporter interface {
 // ProgressReporterFunc adapts a function to a ProgressReporter.
 type ProgressReporterFunc func(ProgressEvent)
 
+// Report calls f with event.
 func (f ProgressReporterFunc) Report(event ProgressEvent) { f(event) }
 
 type progressContextKey struct{}

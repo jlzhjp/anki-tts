@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/internal/streamutil"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/internal/streamutil"
 )
 
 func TestFactoryCreateDefaultsAndEnvironmentKey(t *testing.T) {

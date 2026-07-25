@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/ankitts"
 )
 
 func prepare(
@@ -36,7 +36,9 @@ func RunPlain(
 	input io.Reader,
 	output io.Writer,
 ) error {
-	showNoteIDs(output, "Selected notes:", selection.IDs)
+	if err := showNoteIDs(output, "Selected notes:", selection.IDs); err != nil {
+		return err
+	}
 	var reader *bufio.Reader
 	if !options.Yes {
 		reader = bufio.NewReader(input)
@@ -45,7 +47,9 @@ func RunPlain(
 			return err
 		}
 		if !accepted {
-			fmt.Fprintln(output, "Cancelled.")
+			if _, err := fmt.Fprintln(output, "Cancelled."); err != nil {
+				return fmt.Errorf("write cancellation: %w", err)
+			}
 			return nil
 		}
 	}
@@ -56,7 +60,9 @@ func RunPlain(
 	}
 	overwrites := overwriteNoteIDs(plan.Items())
 	if !options.Yes && len(overwrites) > 0 {
-		showNoteIDs(output, "Notes with non-empty destination fields:", overwrites)
+		if err := showNoteIDs(output, "Notes with non-empty destination fields:", overwrites); err != nil {
+			return err
+		}
 		accepted, err := confirmPlain(
 			reader,
 			output,
@@ -66,7 +72,9 @@ func RunPlain(
 			return err
 		}
 		if !accepted {
-			fmt.Fprintln(output, "Cancelled.")
+			if _, err := fmt.Fprintln(output, "Cancelled."); err != nil {
+				return fmt.Errorf("write cancellation: %w", err)
+			}
 			return nil
 		}
 	}
@@ -92,14 +100,18 @@ func reportBatchResult(
 		}
 	}
 
-	fmt.Fprintf(output, "\nSummary: %d succeeded, %d failed.\n", succeeded, len(failures))
+	if _, err := fmt.Fprintf(output, "\nSummary: %d succeeded, %d failed.\n", succeeded, len(failures)); err != nil {
+		return fmt.Errorf("write batch summary: %w", err)
+	}
 	ordered := append([]ankitts.ItemResult(nil), result.Items...)
 	sort.Slice(ordered, func(i, j int) bool {
 		return ordered[i].NoteID < ordered[j].NoteID
 	})
 	for _, item := range ordered {
 		if item.Err != nil {
-			fmt.Fprintf(output, "  note %d: %v\n", item.NoteID, item.Err)
+			if _, err := fmt.Fprintf(output, "  note %d: %v\n", item.NoteID, item.Err); err != nil {
+				return fmt.Errorf("write batch failure: %w", err)
+			}
 		}
 	}
 	return resultError(result, executionErr)
@@ -126,11 +138,16 @@ func resultError(result ankitts.BatchResult, executionErr error) error {
 	)
 }
 
-func showNoteIDs(output io.Writer, title string, ids []int64) {
-	fmt.Fprintln(output, title)
-	for _, id := range ids {
-		fmt.Fprintf(output, "  %d\n", id)
+func showNoteIDs(output io.Writer, title string, ids []int64) error {
+	if _, err := fmt.Fprintln(output, title); err != nil {
+		return fmt.Errorf("write note list: %w", err)
 	}
+	for _, id := range ids {
+		if _, err := fmt.Fprintf(output, "  %d\n", id); err != nil {
+			return fmt.Errorf("write note list: %w", err)
+		}
+	}
+	return nil
 }
 
 func overwriteNoteIDs(notes []ankitts.PlannedNote) []int64 {
@@ -178,7 +195,7 @@ func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {
 
 	switch event.Kind {
 	case ankitts.ProgressRetrying:
-		fmt.Fprintf(
+		_, _ = fmt.Fprintf(
 			r.output,
 			"Retrying note %d (%s, attempt %d/%d): %v\n",
 			event.NoteID,
@@ -188,7 +205,7 @@ func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {
 			event.Err,
 		)
 	case ankitts.ProgressFailed:
-		fmt.Fprintf(
+		_, _ = fmt.Fprintf(
 			r.output,
 			"FAILED note %d (%s): %v\n",
 			event.NoteID,
@@ -196,7 +213,8 @@ func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {
 			event.Err,
 		)
 	case ankitts.ProgressItemCompleted:
-		fmt.Fprintf(r.output, "Generated note %d\n", event.NoteID)
+		_, _ = fmt.Fprintf(r.output, "Generated note %d\n", event.NoteID)
+	case ankitts.ProgressStarted, ankitts.ProgressUpdated, ankitts.ProgressCompleted:
 	}
 }
 
@@ -205,7 +223,9 @@ func confirmPlain(
 	output io.Writer,
 	prompt string,
 ) (bool, error) {
-	fmt.Fprintf(output, "%s [y/N] ", prompt)
+	if _, err := fmt.Fprintf(output, "%s [y/N] ", prompt); err != nil {
+		return false, fmt.Errorf("write confirmation: %w", err)
+	}
 	answer, err := reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("read confirmation: %w", err)

@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
 )
 
 func TestNoteScreenLoadsOneConsumerWindowAtATime(t *testing.T) {
@@ -18,12 +18,12 @@ func TestNoteScreenLoadsOneConsumerWindowAtATime(t *testing.T) {
 		noteOptions{Query: ankitts.NoteQuery{Filter: "tag:tts"}},
 	)
 
-	started := screen.start()().(noteStreamStartedMsg)
+	started := requireMessage[noteStreamStartedMsg](t, screen.start()())
 	if source.filter != "tag:tts" {
 		t.Fatalf("filter=%q", source.filter)
 	}
 	_, load := screen.Update(started)
-	loaded := load().(notesLoadedMsg)
+	loaded := requireMessage[notesLoadedMsg](t, load())
 	_, _ = screen.Update(loaded)
 
 	if len(screen.notes) != interactiveNoteWindowSize {
@@ -36,7 +36,7 @@ func TestNoteScreenLoadsOneConsumerWindowAtATime(t *testing.T) {
 		t.Fatalf("batches=%d, want 1 before the next window is requested", source.batches)
 	}
 
-	loaded = screen.loadWindow()().(notesLoadedMsg)
+	loaded = requireMessage[notesLoadedMsg](t, screen.loadWindow()())
 	_, _ = screen.Update(loaded)
 	if len(screen.notes) != 2*interactiveNoteWindowSize {
 		t.Fatalf("loaded=%d, want %d", len(screen.notes), 2*interactiveNoteWindowSize)
@@ -64,7 +64,7 @@ func TestNoteScreenRefreshesOnlySelectedNote(t *testing.T) {
 	}
 	refreshNoteList(screen, "saved", 1)
 
-	message := screen.refresh()().(noteRefreshedMsg)
+	message := requireMessage[noteRefreshedMsg](t, screen.refresh()())
 	_, _ = screen.Update(message)
 	if got := screen.notes[0].Fields["Front"].Value; got != "after" {
 		t.Fatalf("Front=%q", got)

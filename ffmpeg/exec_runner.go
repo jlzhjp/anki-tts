@@ -13,6 +13,8 @@ func (execRunner) LookPath(file string) (string, error) {
 }
 
 func (execRunner) Start(ctx context.Context, path string, args []string, stdin io.Reader, stderr io.Writer) (RunningCommand, error) {
+	// #nosec G204 -- path is the result of exec.LookPath("ffmpeg"), and args
+	// are passed directly without a shell.
 	command := exec.CommandContext(ctx, path, args...)
 	command.Stdin = stdin
 	command.Stderr = stderr

@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func registerCompletions(cmd *cobra.Command, options *commandOptions) {
+func registerCompletions(cmd *cobra.Command, _ *commandOptions) {
 	_ = cmd.RegisterFlagCompletionFunc("filter", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	})

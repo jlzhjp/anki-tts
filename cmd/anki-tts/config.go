@@ -7,11 +7,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/ffmpeg"
-	"jlzhjp.dev/anki-tts/openrouter"
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/ffmpeg"
+	"jlzhjp.dev/ankitts/openrouter"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 const configFileName = "config.toml"

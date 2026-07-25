@@ -9,9 +9,13 @@ import (
 type EventKind uint8
 
 const (
+	// Started indicates that an operation attempt has begun.
 	Started EventKind = iota
+	// Retrying indicates that a failed operation will be attempted again.
 	Retrying
+	// Completed indicates that an operation succeeded.
 	Completed
+	// Failed indicates that an operation exhausted its attempts.
 	Failed
 )
 
@@ -38,6 +42,7 @@ type Observer interface {
 // ObserverFunc adapts a function to an Observer.
 type ObserverFunc func(Event)
 
+// Report calls f with event.
 func (f ObserverFunc) Report(event Event) { f(event) }
 
 type scopeContextKey struct{}

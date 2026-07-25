@@ -12,8 +12,8 @@ import (
 	"time"
 	"unicode"
 
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 const maxFinalAudioSize = 32 << 20 // 32 MiB

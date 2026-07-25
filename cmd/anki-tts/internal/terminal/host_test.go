@@ -105,7 +105,10 @@ func TestPresentedWorkflowErrorSkipsErrorOverlay(t *testing.T) {
 	updated, cmd := host.Update(workflowFinishedMsg{
 		result: Result{Err: want, ErrorPresented: true},
 	})
-	host = updated.(*screenHost)
+	host, ok := updated.(*screenHost)
+	if !ok {
+		t.Fatalf("updated model=%T", updated)
+	}
 
 	if cmd == nil || host.failure != nil {
 		t.Fatalf("cmd=%v failure=%v", cmd, host.failure)
@@ -167,11 +170,13 @@ func (s *fakeScreen) Init() tea.Cmd { return nil }
 func (s *fakeScreen) Update(tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
+
 func (s *fakeScreen) View() tea.View {
 	view := tea.NewView("screen")
 	view.AltScreen = s.altScreen
 	return view
 }
+
 func (s *fakeScreen) SetSize(width, height int) {
 	s.width, s.height = width, height
 }

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
 )
 
 func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
@@ -60,7 +60,14 @@ func TestChooseNoteMarksInvalidConfiguredFields(t *testing.T) {
 		SourceField:      "Missing",
 		DestinationField: "AlsoMissing",
 	})
-	candidate := items[0].(listItem).value.(noteCandidate)
+	item, ok := items[0].(listItem)
+	if !ok {
+		t.Fatalf("item=%T", items[0])
+	}
+	candidate, ok := item.value.(noteCandidate)
+	if !ok {
+		t.Fatalf("value=%T", item.value)
+	}
 	if !strings.Contains(candidate.invalid, `missing source field "Missing"`) {
 		t.Fatalf("invalid=%q", candidate.invalid)
 	}
@@ -78,13 +85,22 @@ func TestGenerateNoteAudioRunsApplication(t *testing.T) {
 	}
 	screen := newNoteAudioGenerationScreen(context.Background(), app, request)
 	message := screen.generate()()
-	result := message.(generationFinishedMsg)
+	result := requireMessage[generationFinishedMsg](t, message)
 	if result.err != nil || result.result.Filename != "voice.mp3" {
 		t.Fatalf("result=%+v", result)
 	}
 	if app.request.SourceField != "Front" || app.request.DestinationField != "Audio" {
 		t.Fatalf("request=%+v", app.request)
 	}
+}
+
+func requireMessage[T any](t *testing.T, message any) T {
+	t.Helper()
+	value, ok := message.(T)
+	if !ok {
+		t.Fatalf("message=%T", message)
+	}
+	return value
 }
 
 func TestPromptReportsUnexpectedResultType(t *testing.T) {
@@ -121,6 +137,7 @@ func (a *fakeGenerationApplication) Prepare(request ankitts.GenerationRequest) (
 	a.request = request
 	return ankitts.Plan{}, nil
 }
+
 func (a *fakeGenerationApplication) Execute(
 	context.Context,
 	ankitts.Plan,

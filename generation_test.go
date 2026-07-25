@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 func TestGenerateStoresAndUpdates(t *testing.T) {
@@ -406,6 +406,7 @@ func (f *fakeAnki) StoreMediaFile(_ context.Context, filename string, data []byt
 	}
 	return filename, nil
 }
+
 func (f *fakeAnki) UpdateNote(ctx context.Context, update anki.NoteUpdate) error {
 	f.updateCalls++
 	f.update = update
@@ -469,7 +470,7 @@ func (f *fakeTransformer) Transform(ctx context.Context, input Voice) (Voice, er
 		_ = input.Close()
 		return nil, f.err
 	}
-	var output io.ReadCloser = io.NopCloser(bytes.NewBufferString(f.output))
+	output := io.NopCloser(bytes.NewBufferString(f.output))
 	if f.streamErr != nil {
 		output = io.NopCloser(errorReader{err: f.streamErr})
 	}
@@ -495,12 +496,13 @@ type fakeVoice struct {
 
 func (v *fakeVoice) Format() string    { return v.format }
 func (v *fakeVoice) MediaType() string { return "audio/" + v.format }
-func (v *fakeVoice) LoadCost(context.Context) (float64, error) {
+func (v *fakeVoice) LoadCost(ctx context.Context) (float64, error) {
 	if v.source != nil {
-		return v.source.LoadCost(context.Background())
+		return v.source.LoadCost(ctx)
 	}
 	return v.cost, v.costErr
 }
+
 func (v *fakeVoice) Close() error {
 	v.closeCalls++
 	err := v.ReadCloser.Close()

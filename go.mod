@@ -1,4 +1,4 @@
-module jlzhjp.dev/anki-tts
+module jlzhjp.dev/ankitts
 
 go 1.26.4
 

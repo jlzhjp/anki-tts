@@ -1,0 +1,22 @@
+{
+  "gopls": {
+    "ui.completion.usePlaceholders": true,
+    "completeUnimported": true,
+    "staticcheck": true,
+    "gofumpt": true,
+    "semanticTokens": true,
+    "analyses": {
+      "modernize": true,
+      "shadow": true,
+      "fieldalignment": true,
+      "unusedparams": true,
+      "unusedwrite": true,
+      "nilness": true,
+      "printf": true,
+      "copylocks": true,
+      "lostcancel": true,
+      "loopclosure": true
+    },
+    "directoryFilters": ["-.git", "-node_modules", "-vendor"]
+  }
+}

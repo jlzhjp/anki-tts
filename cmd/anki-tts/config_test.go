@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/ffmpeg"
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/ffmpeg"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 func TestLoadConfigAndBuildServices(t *testing.T) {
@@ -73,6 +73,7 @@ func TestBuildAudioProcessors(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		directory := t.TempDir()
 		executable := filepath.Join(directory, "ffmpeg")
+		// #nosec G306 -- The test fixture must be executable.
 		if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}

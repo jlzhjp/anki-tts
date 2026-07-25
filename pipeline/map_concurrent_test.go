@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -16,7 +17,11 @@ func TestMapConcurrentChangesTypesAndPreservesInputOrder(t *testing.T) {
 		func(_ context.Context, id int) (testItem, error) {
 			current := active.Add(1)
 			defer active.Add(-1)
-			for current > maximum.Load() && !maximum.CompareAndSwap(maximum.Load(), current) {
+			for {
+				previous := maximum.Load()
+				if current <= previous || maximum.CompareAndSwap(previous, current) {
+					break
+				}
 			}
 			if id%2 == 0 {
 				time.Sleep(time.Millisecond)
@@ -31,7 +36,7 @@ func TestMapConcurrentChangesTypesAndPreservesInputOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored, err := MapConcurrent(processed, "anki", 1, func(_ context.Context, item testItem) (string, error) {
-		return string(rune('a' + item.id)), nil
+		return fmt.Sprintf("%c", 'a'+item.id), nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +88,7 @@ func TestMapConcurrentBypassesRemainingStagesAfterFailure(t *testing.T) {
 	var secondCalls atomic.Int32
 	second, err := MapConcurrent(first, "second", 2, func(_ context.Context, item testItem) (string, error) {
 		secondCalls.Add(1)
-		return string(rune('a' + item.id)), nil
+		return fmt.Sprintf("%c", 'a'+item.id), nil
 	})
 	if err != nil {
 		t.Fatal(err)

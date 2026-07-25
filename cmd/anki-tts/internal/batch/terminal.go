@@ -5,14 +5,16 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/terminal"
+	"jlzhjp.dev/ankitts/cmd/anki-tts/internal/terminal"
 )
 
-type client = terminal.Client
-type display = terminal.Display
-type screen = terminal.Screen
-type completedMsg = terminal.CompletedMsg
-type failedMsg = terminal.FailedMsg
+type (
+	client       = terminal.Client
+	display      = terminal.Display
+	screen       = terminal.Screen
+	completedMsg = terminal.CompletedMsg
+	failedMsg    = terminal.FailedMsg
+)
 
 var errBack = terminal.ErrBack
 

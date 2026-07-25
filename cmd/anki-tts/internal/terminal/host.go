@@ -20,8 +20,10 @@ type screenRequest struct {
 	display Display
 }
 
-type screenRequestedMsg struct{ request screenRequest }
-type workflowFinishedMsg struct{ result Result }
+type (
+	screenRequestedMsg  struct{ request screenRequest }
+	workflowFinishedMsg struct{ result Result }
+)
 
 // Result separates command failure from whether the active screen
 // already explains that failure to the user.
@@ -286,6 +288,7 @@ func waitForWorkflow(ctx context.Context, done <-chan Result) tea.Cmd {
 	}
 }
 
+// Run executes a terminal workflow and returns its final error.
 func Run(
 	ctx context.Context,
 	input io.Reader,
@@ -293,9 +296,6 @@ func Run(
 	forceAltScreen bool,
 	workflow func(context.Context, Client) Result,
 ) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/pipeline"
+	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/pipeline"
 )
 
 func TestSearchNotesPassesNativeFilterAndLimitsDeterministically(t *testing.T) {
@@ -127,6 +127,7 @@ func (s *selectionAnki) FindNoteIDs(_ context.Context, filter string) ([]int64, 
 	s.filter = filter
 	return append([]int64(nil), s.ids...), nil
 }
+
 func (s *selectionAnki) NotesInfo(_ context.Context, ids []int64) ([]anki.Note, error) {
 	s.batches = append(s.batches, append([]int64(nil), ids...))
 	if s.infoErr != nil {
@@ -142,6 +143,7 @@ func (s *selectionAnki) NotesInfo(_ context.Context, ids []int64) ([]anki.Note, 
 	}
 	return notes, nil
 }
+
 func (*selectionAnki) StoreMediaFile(context.Context, string, []byte) (string, error) {
 	return "", nil
 }

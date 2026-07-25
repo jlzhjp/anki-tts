@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
-	"jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/ankitts"
 )
 
 // preparationScreen keeps terminal feedback responsive while note details

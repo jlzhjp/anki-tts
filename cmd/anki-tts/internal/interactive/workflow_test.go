@@ -7,8 +7,8 @@ import (
 	"iter"
 	"testing"
 
-	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
+	"jlzhjp.dev/ankitts"
+	"jlzhjp.dev/ankitts/anki"
 )
 
 func TestInteractiveWorkflowSkipsConfiguredStagesAndLoopsNotes(t *testing.T) {
@@ -226,6 +226,7 @@ func (*workflowApplication) SearchNotes(
 ) (ankitts.NoteSelection, error) {
 	return ankitts.NoteSelection{}, nil
 }
+
 func (*workflowApplication) Notes(
 	context.Context,
 	ankitts.NoteSelection,
@@ -233,6 +234,7 @@ func (*workflowApplication) Notes(
 ) iter.Seq[ankitts.NoteResult] {
 	return ankitts.NoteResults()
 }
+
 func (a *workflowApplication) ServiceNames() []string {
 	return a.services
 }
@@ -242,6 +244,7 @@ func (*workflowApplication) Prepare(
 ) (ankitts.Plan, error) {
 	return ankitts.Plan{}, nil
 }
+
 func (*workflowApplication) Execute(
 	context.Context,
 	ankitts.Plan,
