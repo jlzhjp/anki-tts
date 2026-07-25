@@ -54,34 +54,44 @@ func TestListNoteTemplateMetadata(t *testing.T) {
 	}
 }
 
-func TestListNotes(t *testing.T) {
-	call := 0
+func TestFindNoteIDs(t *testing.T) {
 	client := testClient(t, func(t *testing.T, got request) any {
-		call++
-		switch call {
-		case 1:
-			if got.Action != "findNotes" {
-				t.Fatalf("action = %q, want findNotes", got.Action)
-			}
-			params := decodeParams[struct {
-				Query string `json:"query"`
-			}](t, got.Params)
-			if params.Query != `deck:"Japanese \"Core\""` {
-				t.Fatalf("query = %q", params.Query)
-			}
-			return []int64{42}
-		case 2:
-			if got.Action != "notesInfo" {
-				t.Fatalf("action = %q, want notesInfo", got.Action)
-			}
-			return []Note{{ID: 42, ModelName: "Basic", Fields: map[string]Field{"Front": {Value: "猫", Order: 0}}}}
-		default:
-			t.Fatalf("unexpected call %d", call)
-			return nil
+		if got.Action != "findNotes" {
+			t.Fatalf("action = %q, want findNotes", got.Action)
 		}
+		params := decodeParams[struct {
+			Query string `json:"query"`
+		}](t, got.Params)
+		if params.Query != `deck:"Japanese Core" Front:re:^猫$` {
+			t.Fatalf("query = %q", params.Query)
+		}
+		return []int64{42}
 	})
 
-	got, err := client.ListNotes(context.Background(), `Japanese "Core"`)
+	got, err := client.FindNoteIDs(context.Background(), `deck:"Japanese Core" Front:re:^猫$`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []int64{42}) {
+		t.Fatalf("unexpected IDs: %+v", got)
+	}
+}
+
+func TestNotesInfo(t *testing.T) {
+	client := testClient(t, func(t *testing.T, got request) any {
+		if got.Action != "notesInfo" {
+			t.Fatalf("action = %q, want notesInfo", got.Action)
+		}
+		params := decodeParams[struct {
+			Notes []int64 `json:"notes"`
+		}](t, got.Params)
+		if !reflect.DeepEqual(params.Notes, []int64{42}) {
+			t.Fatalf("notes = %v", params.Notes)
+		}
+		return []Note{{ID: 42, ModelName: "Basic", Fields: map[string]Field{"Front": {Value: "猫", Order: 0}}}}
+	})
+
+	got, err := client.NotesInfo(context.Background(), []int64{42})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,20 +100,14 @@ func TestListNotes(t *testing.T) {
 	}
 }
 
-func TestListNotesEmptySkipsNotesInfo(t *testing.T) {
+func TestNotesInfoEmptySkipsRequest(t *testing.T) {
 	client := testClient(t, func(t *testing.T, got request) any {
-		if got.Action != "findNotes" {
-			t.Fatalf("action = %q, want findNotes", got.Action)
-		}
-		return []int64{}
+		t.Fatalf("unexpected action %q", got.Action)
+		return nil
 	})
-
-	got, err := client.ListNotes(context.Background(), "Empty")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || len(got) != 0 {
-		t.Fatalf("ListNotes() = %#v, want non-nil empty slice", got)
+	got, err := client.NotesInfo(context.Background(), nil)
+	if err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("NotesInfo() = %#v, %v", got, err)
 	}
 }
 

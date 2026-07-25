@@ -13,16 +13,22 @@ import (
 )
 
 func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
-	app, plan := preparedBatchWorkflow(t, true)
+	app, ankiClient, selection := preparedBatchWorkflow(t, true)
 	failure := errors.New("generation failed")
 	client := &scriptedClient{}
 	var sequence []string
 	var generationDisplay step.Display
 	client.prompt = func(screen step.Screen, display step.Display) (any, error) {
-		switch screen.(type) {
+		switch screen := screen.(type) {
 		case *step.BatchConfirmationScreen:
+			if len(sequence) == 0 && ankiClient.notesInfoCount() != 0 {
+				t.Fatal("note details loaded before initial confirmation")
+			}
 			sequence = append(sequence, "confirmation")
 			return true, nil
+		case *batchPreparationScreen:
+			sequence = append(sequence, "preparation")
+			return screen.prepare()
 		case *step.BatchGenerationScreen:
 			sequence = append(sequence, "generation")
 			generationDisplay = display
@@ -42,11 +48,11 @@ func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
 		context.Background(),
 		client,
 		app,
-		runOptions{},
-		plan,
+		runOptions{FromField: "Front", ToField: "Audio", Service: "Test"},
+		selection,
 	)
 
-	want := []string{"confirmation", "confirmation", "generation"}
+	want := []string{"confirmation", "preparation", "confirmation", "generation"}
 	if fmt.Sprint(sequence) != fmt.Sprint(want) {
 		t.Fatalf("sequence=%v, want %v", sequence, want)
 	}
@@ -59,9 +65,12 @@ func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
 }
 
 func TestBatchWorkflowYesSkipsConfirmations(t *testing.T) {
-	app, plan := preparedBatchWorkflow(t, true)
+	app, _, selection := preparedBatchWorkflow(t, true)
 	client := &scriptedClient{}
 	client.prompt = func(screen step.Screen, display step.Display) (any, error) {
+		if preparation, ok := screen.(*batchPreparationScreen); ok {
+			return preparation.prepare()
+		}
 		if _, ok := screen.(*step.BatchGenerationScreen); !ok {
 			return nil, fmt.Errorf("unexpected screen %T", screen)
 		}
@@ -76,8 +85,8 @@ func TestBatchWorkflowYesSkipsConfirmations(t *testing.T) {
 		context.Background(),
 		client,
 		app,
-		runOptions{Yes: true},
-		plan,
+		runOptions{FromField: "Front", ToField: "Audio", Service: "Test", Yes: true},
+		selection,
 	)
 
 	if result.err != nil || result.errorPresented {
@@ -85,10 +94,30 @@ func TestBatchWorkflowYesSkipsConfirmations(t *testing.T) {
 	}
 }
 
+func TestBatchWorkflowRejectionSkipsNoteDetails(t *testing.T) {
+	app, ankiClient, selection := preparedBatchWorkflow(t, false)
+	client := &scriptedClient{prompt: func(screen step.Screen, _ step.Display) (any, error) {
+		if _, ok := screen.(*step.BatchConfirmationScreen); !ok {
+			return nil, fmt.Errorf("unexpected screen %T", screen)
+		}
+		return false, nil
+	}}
+	result := runBatchWorkflow(
+		context.Background(),
+		client,
+		app,
+		runOptions{FromField: "Front", ToField: "Audio", Service: "Test"},
+		selection,
+	)
+	if result.err != nil || ankiClient.notesInfoCount() != 0 {
+		t.Fatalf("result=%+v notesInfoCalls=%d", result, ankiClient.notesInfoCount())
+	}
+}
+
 func preparedBatchWorkflow(
 	t *testing.T,
 	overwrite bool,
-) (*ankitts.Application, ankitts.Plan) {
+) (*ankitts.Application, *batchAnki, ankitts.NoteSelection) {
 	t.Helper()
 	destination := ""
 	if overwrite {
@@ -108,8 +137,9 @@ func preparedBatchWorkflow(
 	if err := services.Add("Test", batchTTS{}); err != nil {
 		t.Fatal(err)
 	}
+	ankiClient := &batchAnki{notes: notes}
 	app, err := ankitts.New(
-		&batchAnki{notes: notes},
+		ankiClient,
 		services,
 		nil,
 		pipeline.Config{
@@ -120,14 +150,5 @@ func preparedBatchWorkflow(
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := app.Prepare(ankitts.GenerationRequest{
-		Notes:            notes,
-		SourceField:      "Front",
-		DestinationField: "Audio",
-		Service:          "Test",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return app, plan
+	return app, ankiClient, ankitts.NoteSelection{IDs: []int64{42}}
 }

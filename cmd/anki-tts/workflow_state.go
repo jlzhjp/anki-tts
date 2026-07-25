@@ -26,7 +26,6 @@ type interactiveWorkflow struct {
 }
 
 type workflowState struct {
-	deck             string
 	note             anki.Note
 	sourceField      string
 	destinationField string
@@ -34,21 +33,11 @@ type workflowState struct {
 }
 
 type workflowScreens struct {
-	deck        *step.DeckScreen
 	note        *step.NoteScreen
 	source      *step.SourceFieldScreen
 	destination *step.DestinationFieldScreen
 	overwrite   *step.DestinationOverwriteScreen
 	service     *step.TTSServiceScreen
-}
-
-func (w *interactiveWorkflow) setDeck(deck string) {
-	if deck == w.state.deck {
-		return
-	}
-	w.state = workflowState{deck: deck}
-	w.screens.note = nil
-	w.clearAfterNote()
 }
 
 func (w *interactiveWorkflow) setNote(note anki.Note) {
@@ -108,10 +97,7 @@ func (w *interactiveWorkflow) display() step.Display {
 }
 
 func (s workflowState) contextLine() string {
-	parts := make([]string, 0, 5)
-	if s.deck != "" {
-		parts = append(parts, "Deck: "+s.deck)
-	}
+	parts := make([]string, 0, 4)
 	if s.note.ID != 0 {
 		parts = append(parts, fmt.Sprintf("Note: %d", s.note.ID))
 	}

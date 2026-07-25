@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
 	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
 )
 
@@ -33,35 +32,8 @@ func runInteractiveWorkflow(
 }
 
 func (w *interactiveWorkflow) run(ctx context.Context) error {
-	if len(w.options.Selector.Decks) == 1 {
-		w.setDeck(w.options.Selector.Decks[0])
-		_, err := w.runNotes(ctx)
-		return err
-	}
-
-	for {
-		deck, screen, err := step.ChooseDeck(
-			ctx,
-			w.client,
-			w.app,
-			w.options.Selector.Decks,
-			w.screens.deck,
-			w.display(),
-		)
-		w.screens.deck = screen
-		if errors.Is(err, step.ErrBack) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		w.setDeck(deck)
-		_, err = w.runNotes(ctx)
-		if err != nil {
-			return err
-		}
-	}
+	_, err := w.runNotes(ctx)
+	return err
 }
 
 func (w *interactiveWorkflow) runNotes(ctx context.Context) (navigation, error) {
@@ -70,9 +42,8 @@ func (w *interactiveWorkflow) runNotes(ctx context.Context) (navigation, error) 
 			ctx,
 			w.client,
 			w.app,
-			w.state.deck,
 			step.NoteOptions{
-				Selector:         w.options.Selector,
+				Query:            w.options.Query,
 				SourceField:      w.options.FromField,
 				DestinationField: w.options.ToField,
 			},
@@ -237,7 +208,7 @@ func (w *interactiveWorkflow) chooseServiceAndGenerate(
 
 func (w *interactiveWorkflow) generate(ctx context.Context) (navigation, error) {
 	request := ankitts.GenerationRequest{
-		Notes:            []anki.Note{w.state.note},
+		Notes:            ankitts.NoteResults(w.state.note),
 		SourceField:      w.state.sourceField,
 		DestinationField: w.state.destinationField,
 		Service:          w.state.service,

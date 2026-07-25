@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"testing"
 
 	"jlzhjp.dev/anki-tts"
@@ -34,7 +35,6 @@ func TestInteractiveWorkflowSkipsConfiguredStagesAndLoopsNotes(t *testing.T) {
 		client,
 		app,
 		runOptions{
-			Selector:  ankitts.NoteSelector{Decks: []string{"Japanese"}},
 			FromField: "Front",
 			ToField:   "Audio",
 			Service:   "openrouter",
@@ -89,8 +89,7 @@ func TestInteractiveWorkflowBackUnwindsVisibleStages(t *testing.T) {
 		client,
 		app,
 		runOptions{
-			Selector: ankitts.NoteSelector{Decks: []string{"Japanese"}},
-			Yes:      true,
+			Yes: true,
 		},
 	)
 	if !errors.Is(err, context.Canceled) {
@@ -141,9 +140,8 @@ func TestInteractiveWorkflowBackSkipsConfiguredStages(t *testing.T) {
 		client,
 		app,
 		runOptions{
-			Selector: ankitts.NoteSelector{Decks: []string{"Japanese"}},
-			ToField:  "Audio",
-			Yes:      true,
+			ToField: "Audio",
+			Yes:     true,
 		},
 	)
 	if !errors.Is(err, context.Canceled) {
@@ -180,7 +178,6 @@ func TestInteractiveWorkflowUsesIterativeNoteCycle(t *testing.T) {
 		client,
 		app,
 		runOptions{
-			Selector:  ankitts.NoteSelector{Decks: []string{"Japanese"}},
 			FromField: "Front",
 			ToField:   "Audio",
 			Service:   "openrouter",
@@ -224,14 +221,18 @@ type workflowApplication struct {
 	services []string
 }
 
-func (*workflowApplication) ListDecks(context.Context) ([]string, error) {
-	return nil, nil
-}
-func (*workflowApplication) SelectNotes(
+func (*workflowApplication) SearchNotes(
 	context.Context,
-	ankitts.NoteSelector,
-) ([]anki.Note, error) {
-	return nil, nil
+	ankitts.NoteQuery,
+) (ankitts.NoteSelection, error) {
+	return ankitts.NoteSelection{}, nil
+}
+func (*workflowApplication) Notes(
+	context.Context,
+	ankitts.NoteSelection,
+	ankitts.NoteLoadOptions,
+) iter.Seq[ankitts.NoteResult] {
+	return ankitts.NoteResults()
 }
 func (a *workflowApplication) ServiceNames() []string {
 	return a.services

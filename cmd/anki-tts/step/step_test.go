@@ -71,7 +71,7 @@ func TestGenerateNoteAudioRunsApplication(t *testing.T) {
 		result: ankitts.GenerateResult{Filename: "voice.mp3"},
 	}
 	request := ankitts.GenerationRequest{
-		Notes:            []anki.Note{testNote()},
+		Notes:            ankitts.NoteResults(testNote()),
 		SourceField:      "Front",
 		DestinationField: "Audio",
 		Service:          "openrouter",

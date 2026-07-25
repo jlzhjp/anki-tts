@@ -20,60 +20,56 @@ func prepareBatch(
 	ctx context.Context,
 	app application,
 	options runOptions,
-) (ankitts.Plan, bool, error) {
-	notes, err := app.SelectNotes(ctx, options.Selector)
-	if err != nil {
-		return ankitts.Plan{}, false, err
-	}
-	if len(notes) == 0 {
-		return ankitts.Plan{}, false, nil
-	}
-
-	plan, err := app.Prepare(ankitts.GenerationRequest{
-		Notes:            notes,
+	selection ankitts.NoteSelection,
+) (ankitts.Plan, error) {
+	return app.Prepare(ankitts.GenerationRequest{
+		Notes:            app.Notes(ctx, selection, ankitts.NoteLoadOptions{}),
 		SourceField:      options.FromField,
 		DestinationField: options.ToField,
 		Service:          options.Service,
 	})
-	if err != nil {
-		return ankitts.Plan{}, false, err
-	}
-	return plan, true, nil
 }
 
 func runPlainBatch(
 	ctx context.Context,
 	app application,
 	options runOptions,
-	plan ankitts.Plan,
+	selection ankitts.NoteSelection,
 	input io.Reader,
 	output io.Writer,
 ) error {
-	overwrites := showNotes(output, plan.Items())
+	showNoteIDs(output, "Selected notes:", selection.IDs)
+	var reader *bufio.Reader
 	if !options.Yes {
-		confirmations := []plainConfirmation{
-			{required: true, prompt: "Generate audio for these notes?"},
-			{
-				required: overwrites > 0,
-				prompt: fmt.Sprintf(
-					"Replace %d non-empty destination field(s)?",
-					overwrites,
-				),
-			},
+		reader = bufio.NewReader(input)
+		accepted, err := confirmPlain(reader, output, "Generate audio for these notes?")
+		if err != nil {
+			return err
 		}
-		reader := bufio.NewReader(input)
-		for _, confirmation := range confirmations {
-			if !confirmation.required {
-				continue
-			}
-			accepted, err := confirmPlain(reader, output, confirmation.prompt)
-			if err != nil {
-				return err
-			}
-			if !accepted {
-				fmt.Fprintln(output, "Cancelled.")
-				return nil
-			}
+		if !accepted {
+			fmt.Fprintln(output, "Cancelled.")
+			return nil
+		}
+	}
+
+	plan, err := prepareBatch(ctx, app, options, selection)
+	if err != nil {
+		return err
+	}
+	overwrites := overwriteNoteIDs(plan.Items())
+	if !options.Yes && len(overwrites) > 0 {
+		showNoteIDs(output, "Notes with non-empty destination fields:", overwrites)
+		accepted, err := confirmPlain(
+			reader,
+			output,
+			fmt.Sprintf("Replace %d non-empty destination field(s)?", len(overwrites)),
+		)
+		if err != nil {
+			return err
+		}
+		if !accepted {
+			fmt.Fprintln(output, "Cancelled.")
+			return nil
 		}
 	}
 
@@ -81,11 +77,6 @@ func runPlainBatch(
 		Progress: &plainProgressReporter{output: output},
 	})
 	return reportBatchResult(output, result, executionErr)
-}
-
-type plainConfirmation struct {
-	required bool
-	prompt   string
 }
 
 func reportBatchResult(
@@ -137,53 +128,21 @@ func batchResultError(result ankitts.BatchResult, executionErr error) error {
 	)
 }
 
-func showNotes(output io.Writer, notes []ankitts.PlannedNote) int {
-	fmt.Fprintln(output, "Selected notes:")
-	overwrites := 0
+func showNoteIDs(output io.Writer, title string, ids []int64) {
+	fmt.Fprintln(output, title)
+	for _, id := range ids {
+		fmt.Fprintf(output, "  %d\n", id)
+	}
+}
+
+func overwriteNoteIDs(notes []ankitts.PlannedNote) []int64 {
+	ids := make([]int64, 0)
 	for _, note := range notes {
-		preview := compactPreview(note.SourceText, 60)
-		status := "empty destination"
 		if note.WillOverwrite {
-			overwrites++
-			status = highlight(output, "WILL OVERWRITE")
+			ids = append(ids, note.NoteID)
 		}
-		fmt.Fprintf(
-			output,
-			"  %d  %-20s  %s  [%s]\n",
-			note.Note.ID,
-			note.Note.ModelName,
-			preview,
-			status,
-		)
 	}
-	return overwrites
-}
-
-func compactPreview(value string, limit int) string {
-	return truncate(strings.Join(strings.Fields(value), " "), limit)
-}
-
-func truncate(value string, limit int) string {
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
-	}
-	if limit <= 3 {
-		return string(runes[:limit])
-	}
-	return string(runes[:limit-3]) + "..."
-}
-
-func highlight(output io.Writer, value string) string {
-	file, ok := output.(*os.File)
-	if !ok {
-		return value
-	}
-	info, err := file.Stat()
-	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
-		return value
-	}
-	return red(value)
+	return ids
 }
 
 func red(value string) string {

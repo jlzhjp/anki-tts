@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
 )
 
 func TestBatchConfirmationChoosesAlternateScreenFromHeight(t *testing.T) {
@@ -25,9 +24,8 @@ func TestBatchConfirmationChoosesAlternateScreenFromHeight(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			screen := &BatchConfirmationScreen{
-				notes:  plannedNotes(test.count, false),
-				width:  100,
-				height: 24,
+				noteIDs: noteIDs(test.count),
+				height:  24,
 			}
 			screen.SetSize(100, test.height)
 			if screen.View().AltScreen != test.want {
@@ -113,7 +111,7 @@ func TestBatchStepFunctionsConstructTypedScreens(t *testing.T) {
 	accepted, confirmation, err := ConfirmBatch(
 		context.Background(),
 		confirmationClient,
-		plannedNotes(1, false),
+		[]int64{1},
 		false,
 		nil,
 		Display{},
@@ -193,14 +191,17 @@ func plannedNotes(count int, overwrite bool) []ankitts.PlannedNote {
 	notes := make([]ankitts.PlannedNote, count)
 	for index := range notes {
 		notes[index] = ankitts.PlannedNote{
-			Index: index,
-			Note: anki.Note{
-				ID:        int64(index + 1),
-				ModelName: "Basic",
-			},
-			SourceText:    "hello",
+			NoteID:        int64(index + 1),
 			WillOverwrite: overwrite,
 		}
 	}
 	return notes
+}
+
+func noteIDs(count int) []int64 {
+	ids := make([]int64, count)
+	for index := range ids {
+		ids[index] = int64(index + 1)
+	}
+	return ids
 }

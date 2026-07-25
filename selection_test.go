@@ -2,6 +2,8 @@ package ankitts
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -9,71 +11,136 @@ import (
 	"jlzhjp.dev/anki-tts/pipeline"
 )
 
-func TestSelectNotesCombinesSelectorsAndLimitsDeterministically(t *testing.T) {
-	client := &selectionAnki{notes: map[string][]anki.Note{
-		"A": {
-			{ID: 30, ModelName: "Basic", Fields: map[string]anki.Field{"Front": {Value: "<b>cat</b>"}}},
-			{ID: 10, ModelName: "Cloze", Fields: map[string]anki.Field{"Front": {Value: "cat"}}},
-		},
-		"B": {
-			{ID: 30, ModelName: "Basic", Fields: map[string]anki.Field{"Front": {Value: "<b>cat</b>"}}},
-			{ID: 5, ModelName: "Basic", Fields: map[string]anki.Field{"Front": {Value: "cat"}}},
-			{ID: 20, ModelName: "Basic", Fields: map[string]anki.Field{"Front": {Value: "dog"}}},
-		},
-	}}
-	matcher, err := ParseFieldMatcher(`Front=^cat$`)
+func TestSearchNotesPassesNativeFilterAndLimitsDeterministically(t *testing.T) {
+	client := &selectionAnki{ids: []int64{30, 5, 30, 20, 10}}
+	app := newSelectionApplication(t, client)
+	selection, err := app.SearchNotes(context.Background(), NoteQuery{
+		Filter: `deck:Japanese note:Basic`,
+		Limit:  3,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := New(client, nil, nil, pipeline.Config{
+	if client.filter != `deck:Japanese note:Basic` {
+		t.Fatalf("filter=%q", client.filter)
+	}
+	if !reflect.DeepEqual(selection.IDs, []int64{5, 10, 20}) {
+		t.Fatalf("IDs=%v", selection.IDs)
+	}
+}
+
+func TestSearchNotesRejectsNegativeLimit(t *testing.T) {
+	app := newSelectionApplication(t, &selectionAnki{})
+	if _, err := app.SearchNotes(context.Background(), NoteQuery{Limit: -1}); err == nil {
+		t.Fatal("negative limit was accepted")
+	}
+}
+
+func TestNotesLoadsLazilyInStableBatches(t *testing.T) {
+	client := &selectionAnki{notes: map[int64]anki.Note{
+		1: {ID: 1}, 2: {ID: 2}, 3: {ID: 3}, 4: {ID: 4}, 5: {ID: 5},
+	}}
+	app := newSelectionApplication(t, client)
+	sequence := app.Notes(
+		context.Background(),
+		NoteSelection{IDs: []int64{1, 2, 3, 4, 5}},
+		NoteLoadOptions{BatchSize: 2},
+	)
+	if len(client.batches) != 0 {
+		t.Fatal("notesInfo was called before iteration")
+	}
+
+	var got []int64
+	for result := range sequence {
+		if result.Err != nil {
+			t.Fatal(result.Err)
+		}
+		got = append(got, result.Note.ID)
+		if len(got) == 3 {
+			break
+		}
+	}
+	if !reflect.DeepEqual(got, []int64{1, 2, 3}) {
+		t.Fatalf("IDs=%v", got)
+	}
+	if !reflect.DeepEqual(client.batches, [][]int64{{1, 2}, {3, 4}}) {
+		t.Fatalf("batches=%v", client.batches)
+	}
+}
+
+func TestNotesYieldsOneTerminalError(t *testing.T) {
+	want := errors.New("collection unavailable")
+	client := &selectionAnki{infoErr: want}
+	app := newSelectionApplication(t, client)
+	var results []NoteResult
+	for result := range app.Notes(
+		context.Background(),
+		NoteSelection{IDs: []int64{1, 2}},
+		NoteLoadOptions{BatchSize: 1},
+	) {
+		results = append(results, result)
+	}
+	if len(results) != 1 || !errors.Is(results[0].Err, want) {
+		t.Fatalf("results=%v", results)
+	}
+}
+
+func TestNotesRejectsNegativeBatchSizeWithoutCallingAnki(t *testing.T) {
+	client := &selectionAnki{}
+	app := newSelectionApplication(t, client)
+	var results []NoteResult
+	for result := range app.Notes(
+		context.Background(),
+		NoteSelection{IDs: []int64{1}},
+		NoteLoadOptions{BatchSize: -1},
+	) {
+		results = append(results, result)
+	}
+	if len(results) != 1 || results[0].Err == nil {
+		t.Fatalf("results=%v", results)
+	}
+	if len(client.batches) != 0 {
+		t.Fatalf("notesInfo batches=%v", client.batches)
+	}
+}
+
+func newSelectionApplication(t *testing.T, client *selectionAnki) *Application {
+	t.Helper()
+	app, err := New(client, nil, nil, pipeline.Config{
 		"anki": pipeline.DefaultStageConfig(1),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	notes, err := service.SelectNotes(context.Background(), NoteSelector{
-		Decks:         []string{"A", "B"},
-		NoteTemplates: []string{"Basic"},
-		FieldMatchers: []FieldMatcher{matcher},
-		Limit:         1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := noteIDs(notes); !reflect.DeepEqual(got, []int64{5}) {
-		t.Fatalf("note IDs = %v", got)
-	}
+	return app
 }
 
-func TestParseFieldMatcher(t *testing.T) {
-	matcher, err := ParseFieldMatcher(`Expression=^ねこ$`)
-	if err != nil || matcher.Field != "Expression" || !matcher.Pattern.MatchString("ねこ") {
-		t.Fatalf("matcher=%+v error=%v", matcher, err)
+type selectionAnki struct {
+	ids     []int64
+	notes   map[int64]anki.Note
+	filter  string
+	batches [][]int64
+	infoErr error
+}
+
+func (s *selectionAnki) FindNoteIDs(_ context.Context, filter string) ([]int64, error) {
+	s.filter = filter
+	return append([]int64(nil), s.ids...), nil
+}
+func (s *selectionAnki) NotesInfo(_ context.Context, ids []int64) ([]anki.Note, error) {
+	s.batches = append(s.batches, append([]int64(nil), ids...))
+	if s.infoErr != nil {
+		return nil, s.infoErr
 	}
-	for _, value := range []string{"missing-separator", "=empty-field", "Front=["} {
-		if _, err := ParseFieldMatcher(value); err == nil {
-			t.Fatalf("ParseFieldMatcher(%q) succeeded", value)
+	notes := make([]anki.Note, 0, len(ids))
+	for _, id := range ids {
+		note, ok := s.notes[id]
+		if !ok {
+			return nil, fmt.Errorf("unknown note %d", id)
 		}
+		notes = append(notes, note)
 	}
-}
-
-func noteIDs(notes []anki.Note) []int64 {
-	ids := make([]int64, len(notes))
-	for index, note := range notes {
-		ids[index] = note.ID
-	}
-	return ids
-}
-
-type selectionAnki struct{ notes map[string][]anki.Note }
-
-func (*selectionAnki) ListDecks(context.Context) ([]string, error)         { return nil, nil }
-func (*selectionAnki) ListNoteTemplates(context.Context) ([]string, error) { return nil, nil }
-func (*selectionAnki) ListTemplateFields(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-func (s *selectionAnki) ListNotes(_ context.Context, deck string) ([]anki.Note, error) {
-	return s.notes[deck], nil
+	return notes, nil
 }
 func (*selectionAnki) StoreMediaFile(context.Context, string, []byte) (string, error) {
 	return "", nil

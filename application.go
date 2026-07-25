@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
 
 	"jlzhjp.dev/anki-tts/anki"
@@ -16,17 +17,15 @@ const persistenceStage = "anki"
 
 // AnkiClient contains the Anki operations used by the application.
 type AnkiClient interface {
-	ListDecks(context.Context) ([]string, error)
-	ListNoteTemplates(context.Context) ([]string, error)
-	ListTemplateFields(context.Context, string) ([]string, error)
-	ListNotes(context.Context, string) ([]anki.Note, error)
+	FindNoteIDs(context.Context, string) ([]int64, error)
+	NotesInfo(context.Context, []int64) ([]anki.Note, error)
 	StoreMediaFile(context.Context, string, []byte) (string, error)
 	UpdateNote(context.Context, anki.NoteUpdate) error
 }
 
-// GenerationRequest describes notes that share generation settings.
+// GenerationRequest describes a note stream that shares generation settings.
 type GenerationRequest struct {
-	Notes            []anki.Note
+	Notes            iter.Seq[NoteResult]
 	SourceField      string
 	DestinationField string
 	Service          string
@@ -34,9 +33,7 @@ type GenerationRequest struct {
 
 // PlannedNote is safe presentation data produced before execution.
 type PlannedNote struct {
-	Index         int
-	Note          anki.Note
-	SourceText    string
+	NoteID        int64
 	WillOverwrite bool
 }
 
@@ -51,16 +48,14 @@ func (p Plan) Items() []PlannedNote {
 	items := make([]PlannedNote, len(p.jobs))
 	for index, job := range p.jobs {
 		items[index] = PlannedNote{
-			Index: job.index, Note: job.note, SourceText: job.text,
-			WillOverwrite: job.willOverwrite,
+			NoteID: job.noteID, WillOverwrite: job.willOverwrite,
 		}
 	}
 	return items
 }
 
 type preparedJob struct {
-	index            int
-	note             anki.Note
+	noteID           int64
 	text             string
 	destinationField string
 	service          Service
@@ -116,25 +111,13 @@ func New(client AnkiClient, services *ServiceContainer, processors []AudioProces
 	}, nil
 }
 
-func (a *Application) ListDecks(ctx context.Context) ([]string, error) {
-	return a.anki.ListDecks(ctx)
-}
-
-func (a *Application) ListNoteTemplates(ctx context.Context) ([]string, error) {
-	return a.anki.ListNoteTemplates(ctx)
-}
-
-func (a *Application) ListTemplateFields(ctx context.Context, template string) ([]string, error) {
-	return a.anki.ListTemplateFields(ctx, template)
-}
-
 // ServiceNames returns configured TTS service names in display order.
 func (a *Application) ServiceNames() []string { return a.services.Names() }
 
 // HasAudioProcessors reports whether generated audio passes through processors.
 func (a *Application) HasAudioProcessors() bool { return len(a.processors) > 0 }
 
-// Prepare validates a generation request and extracts source text before external work.
+// Prepare fully validates and compacts a request before generation or mutation.
 func (a *Application) Prepare(request GenerationRequest) (Plan, error) {
 	service, ok := a.services.get(request.Service)
 	if !ok {
@@ -150,9 +133,17 @@ func (a *Application) Prepare(request GenerationRequest) (Plan, error) {
 		return Plan{}, errors.New("destination field is required")
 	}
 
-	jobs := make([]preparedJob, 0, len(request.Notes))
+	if request.Notes == nil {
+		return Plan{}, errors.New("notes are required")
+	}
+
+	jobs := make([]preparedJob, 0)
 	var invalid []string
-	for index, note := range request.Notes {
+	for result := range request.Notes {
+		if result.Err != nil {
+			return Plan{}, result.Err
+		}
+		note := result.Note
 		source, ok := note.Fields[request.SourceField]
 		if !ok {
 			invalid = append(invalid, fmt.Sprintf("note %d: missing source field %q", note.ID, request.SourceField))
@@ -173,7 +164,7 @@ func (a *Application) Prepare(request GenerationRequest) (Plan, error) {
 			continue
 		}
 		jobs = append(jobs, preparedJob{
-			index: index, note: note, text: text, destinationField: request.DestinationField,
+			noteID: note.ID, text: text, destinationField: request.DestinationField,
 			service: service, willOverwrite: strings.TrimSpace(destination.Value) != "",
 		})
 	}

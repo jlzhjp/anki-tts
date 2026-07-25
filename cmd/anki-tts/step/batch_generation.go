@@ -198,7 +198,7 @@ func (s *BatchGenerationScreen) progressView() string {
 		fmt.Fprintf(
 			&builder,
 			"\n  note %d · %s",
-			s.notes[index].Note.ID,
+			s.notes[index].NoteID,
 			state.operation,
 		)
 		if !state.retryAt.IsZero() {
@@ -222,7 +222,7 @@ func (s *BatchGenerationScreen) progressView() string {
 			fmt.Fprintf(
 				&builder,
 				"\n  note %d · %s: %s",
-				s.notes[index].Note.ID,
+				s.notes[index].NoteID,
 				state.operation,
 				red(state.err.Error()),
 			)

@@ -135,7 +135,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		func(ctx context.Context, stored storedItem) (GenerateResult, error) {
 			tag := "[sound:" + stored.filename + "]"
 			err := a.anki.UpdateNote(ctx, anki.NoteUpdate{
-				ID:     stored.item.job.note.ID,
+				ID:     stored.item.job.noteID,
 				Fields: map[string]string{stored.item.job.destinationField: tag},
 			})
 			if err != nil {
@@ -170,7 +170,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		}
 		job := plan.jobs[event.Index]
 		options.Progress.Report(ProgressEvent{
-			Kind: event.Kind, Index: event.Index, NoteID: job.note.ID,
+			Kind: event.Kind, Index: event.Index, NoteID: job.noteID,
 			Stage: event.Stage, Operation: Operation(event.Operation), Attempt: event.Attempt,
 			MaxAttempts: event.MaxAttempts, RetryAt: event.RetryAt, Err: event.Err,
 		})
@@ -178,9 +178,9 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 	outcomes, executionErr := pipeline.Collect(ctx, persisted, observer)
 	for _, outcome := range outcomes {
 		job := plan.jobs[outcome.Index]
-		entry := ItemResult{Index: outcome.Index, NoteID: job.note.ID, Stage: outcome.Stage, Result: outcome.Value}
+		entry := ItemResult{Index: outcome.Index, NoteID: job.noteID, Stage: outcome.Stage, Result: outcome.Value}
 		if outcome.Err != nil {
-			entry.Err = &StageError{NoteID: job.note.ID, Stage: outcome.Stage, Err: outcome.Err}
+			entry.Err = &StageError{NoteID: job.noteID, Stage: outcome.Stage, Err: outcome.Err}
 		}
 		result.Items[outcome.Index] = entry
 	}
@@ -229,7 +229,7 @@ func processAudio(ctx context.Context, transformer Transformer, source synthesiz
 
 func audioFilename(item generationItem) string {
 	hash := sha256.Sum256(item.audio.data)
-	return fmt.Sprintf("anki-tts-%d-%x.%s", item.job.note.ID, hash[:6], item.audio.format)
+	return fmt.Sprintf("anki-tts-%d-%x.%s", item.job.noteID, hash[:6], item.audio.format)
 }
 
 func readVoice(ctx context.Context, voice Voice) ([]byte, string, string, error) {

@@ -120,9 +120,7 @@ func TestFailuresBeforeUploadLeaveAnkiUnchanged(t *testing.T) {
 			service := newTestApplication(t, client, test.provider, test.transformer)
 			req := spec()
 			if test.name == "empty source" {
-				field := req.Notes[0].Fields["Front"]
-				field.Value = "<br>"
-				req.Notes[0].Fields["Front"] = field
+				req = specWithSource("<br>")
 			}
 			_, err := executeOne(context.Background(), service, req)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
@@ -229,11 +227,15 @@ func container(t *testing.T, service Service) *ServiceContainer {
 }
 
 func spec() GenerationRequest {
+	return specWithSource(`<b>Hello</b>&nbsp;world`)
+}
+
+func specWithSource(source string) GenerationRequest {
 	return GenerationRequest{
-		Notes: []anki.Note{{ID: 42, Fields: map[string]anki.Field{
-			"Front": {Value: `<b>Hello</b>&nbsp;world`},
+		Notes: NoteResults(anki.Note{ID: 42, Fields: map[string]anki.Field{
+			"Front": {Value: source},
 			"Audio": {Value: "existing"},
-		}}},
+		}}),
 		SourceField: "Front", DestinationField: "Audio",
 		Service: "openrouter",
 	}
@@ -291,10 +293,8 @@ type fakeAnki struct {
 	updateErrs    []error
 }
 
-func (*fakeAnki) ListDecks(context.Context) ([]string, error)                  { return nil, nil }
-func (*fakeAnki) ListNotes(context.Context, string) ([]anki.Note, error)       { return nil, nil }
-func (*fakeAnki) ListNoteTemplates(context.Context) ([]string, error)          { return nil, nil }
-func (*fakeAnki) ListTemplateFields(context.Context, string) ([]string, error) { return nil, nil }
+func (*fakeAnki) FindNoteIDs(context.Context, string) ([]int64, error)    { return nil, nil }
+func (*fakeAnki) NotesInfo(context.Context, []int64) ([]anki.Note, error) { return nil, nil }
 func (f *fakeAnki) StoreMediaFile(_ context.Context, filename string, data []byte) (string, error) {
 	f.storeCalls++
 	f.mediaFilename = filename

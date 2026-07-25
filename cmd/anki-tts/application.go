@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"iter"
 	"strings"
 
 	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/anki"
 	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
 )
 
 type application interface {
-	ListDecks(context.Context) ([]string, error)
-	SelectNotes(context.Context, ankitts.NoteSelector) ([]anki.Note, error)
+	SearchNotes(context.Context, ankitts.NoteQuery) (ankitts.NoteSelection, error)
+	Notes(context.Context, ankitts.NoteSelection, ankitts.NoteLoadOptions) iter.Seq[ankitts.NoteResult]
 	ServiceNames() []string
 	HasAudioProcessors() bool
 	Prepare(ankitts.GenerationRequest) (ankitts.Plan, error)
@@ -21,7 +21,7 @@ type application interface {
 }
 
 type runOptions struct {
-	Selector    ankitts.NoteSelector
+	Query       ankitts.NoteQuery
 	FromField   string
 	ToField     string
 	Service     string
@@ -49,19 +49,19 @@ func runApplication(
 	if err := validateBatchOptions(options); err != nil {
 		return err
 	}
-	plan, ok, err := prepareBatch(ctx, app, options)
+	selection, err := app.SearchNotes(ctx, options.Query)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		fmt.Fprintln(output, "No notes matched the selectors.")
+	if len(selection.IDs) == 0 {
+		fmt.Fprintln(output, "No notes matched the filter.")
 		return nil
 	}
 	if !isTerminal(input) || !isTerminal(output) {
-		return runPlainBatch(ctx, app, options, plan, input, output)
+		return runPlainBatch(ctx, app, options, selection, input, output)
 	}
 	return runTerminal(ctx, input, output, false, func(ctx context.Context, client step.Client) workflowResult {
-		return runBatchWorkflow(ctx, client, app, options, plan)
+		return runBatchWorkflow(ctx, client, app, options, selection)
 	})
 }
 

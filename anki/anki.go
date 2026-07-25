@@ -136,19 +136,19 @@ func (c *Client) ListTemplateFields(ctx context.Context, template string) ([]str
 	return fields, nil
 }
 
-// ListNotes returns all notes in deck. Notes in child decks are included,
-// matching Anki's deck search semantics. An empty deck returns all notes.
-func (c *Client) ListNotes(ctx context.Context, deck string) ([]Note, error) {
-	query := ""
-	if strings.TrimSpace(deck) != "" {
-		query = `deck:"` + escapeSearchValue(deck) + `"`
-	}
+// FindNoteIDs returns note IDs matching Anki's native search syntax.
+func (c *Client) FindNoteIDs(ctx context.Context, query string) ([]int64, error) {
 	var ids []int64
 	if err := c.invoke(ctx, "findNotes", struct {
 		Query string `json:"query"`
 	}{Query: query}, &ids); err != nil {
-		return nil, fmt.Errorf("list notes: find notes: %w", err)
+		return nil, fmt.Errorf("find notes: %w", err)
 	}
+	return ids, nil
+}
+
+// NotesInfo returns complete note information for the supplied IDs.
+func (c *Client) NotesInfo(ctx context.Context, ids []int64) ([]Note, error) {
 	if len(ids) == 0 {
 		return []Note{}, nil
 	}
@@ -157,7 +157,7 @@ func (c *Client) ListNotes(ctx context.Context, deck string) ([]Note, error) {
 	if err := c.invoke(ctx, "notesInfo", struct {
 		Notes []int64 `json:"notes"`
 	}{Notes: ids}, &notes); err != nil {
-		return nil, fmt.Errorf("list notes: get note information: %w", err)
+		return nil, fmt.Errorf("get note information: %w", err)
 	}
 	return notes, nil
 }
@@ -329,9 +329,4 @@ func (c *Client) invoke(ctx context.Context, action string, params, result any) 
 		return fmt.Errorf("decode result: %w", err)
 	}
 	return nil
-}
-
-func escapeSearchValue(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	return strings.ReplaceAll(value, `"`, `\"`)
 }

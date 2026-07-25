@@ -13,14 +13,13 @@ func runBatchWorkflow(
 	client step.Client,
 	app application,
 	options runOptions,
-	plan ankitts.Plan,
+	selection ankitts.NoteSelection,
 ) workflowResult {
-	notes := plan.Items()
 	if !options.Yes {
 		accepted, _, err := step.ConfirmBatch(
 			ctx,
 			client,
-			notes,
+			selection.IDs,
 			false,
 			nil,
 			step.Display{},
@@ -34,25 +33,32 @@ func runBatchWorkflow(
 		if !accepted {
 			return workflowResult{}
 		}
+	}
 
-		if hasOverwrites(notes) {
-			accepted, _, err = step.ConfirmBatch(
-				ctx,
-				client,
-				notes,
-				true,
-				nil,
-				step.Display{},
-			)
-			if errors.Is(err, step.ErrBack) {
-				return workflowResult{}
-			}
-			if err != nil {
-				return workflowResult{err: err}
-			}
-			if !accepted {
-				return workflowResult{}
-			}
+	plan, err := prepareTerminalBatch(ctx, client, func() (ankitts.Plan, error) {
+		return prepareBatch(ctx, app, options, selection)
+	})
+	if err != nil {
+		return workflowResult{err: err}
+	}
+	overwrites := overwriteNoteIDs(plan.Items())
+	if !options.Yes && len(overwrites) > 0 {
+		accepted, _, err := step.ConfirmBatch(
+			ctx,
+			client,
+			overwrites,
+			true,
+			nil,
+			step.Display{},
+		)
+		if errors.Is(err, step.ErrBack) {
+			return workflowResult{}
+		}
+		if err != nil {
+			return workflowResult{err: err}
+		}
+		if !accepted {
+			return workflowResult{}
 		}
 	}
 
@@ -71,13 +77,4 @@ func runBatchWorkflow(
 		err:            resultErr,
 		errorPresented: resultErr != nil,
 	}
-}
-
-func hasOverwrites(notes []ankitts.PlannedNote) bool {
-	for _, note := range notes {
-		if note.WillOverwrite {
-			return true
-		}
-	}
-	return false
 }
