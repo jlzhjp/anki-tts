@@ -52,7 +52,7 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 		Kind:        ankitts.ProgressRetrying,
 		Index:       0,
 		NoteID:      1,
-		Operation:   ankitts.OperationSynthesize,
+		Description: "Generating speech with test-model",
 		Attempt:     1,
 		MaxAttempts: 3,
 		RetryAt:     time.Now().Add(time.Second),
@@ -61,7 +61,7 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 	screen = updated.(*generationScreen)
 	for _, want := range []string{
 		"note 1",
-		"generate voice",
+		"Generating speech with test-model",
 		"retry 2/3",
 		"rate limited",
 	} {

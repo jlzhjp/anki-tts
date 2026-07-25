@@ -148,13 +148,33 @@ func red(value string) string {
 }
 
 type plainProgressReporter struct {
-	mu     sync.Mutex
-	output io.Writer
+	mu           sync.Mutex
+	output       io.Writer
+	descriptions map[int]string
+	stages       map[int]string
 }
 
 func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.descriptions == nil {
+		r.descriptions = make(map[int]string)
+		r.stages = make(map[int]string)
+	}
+	if event.Stage != "" {
+		r.stages[event.Index] = event.Stage
+	}
+	if event.Kind == ankitts.ProgressStarted {
+		delete(r.descriptions, event.Index)
+	}
+	if event.Description != "" {
+		r.descriptions[event.Index] = event.Description
+	}
+	description := r.descriptions[event.Index]
+	if description == "" {
+		description = r.stages[event.Index]
+	}
 
 	switch event.Kind {
 	case ankitts.ProgressRetrying:
@@ -162,7 +182,7 @@ func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {
 			r.output,
 			"Retrying note %d (%s, attempt %d/%d): %v\n",
 			event.NoteID,
-			event.Operation,
+			description,
 			event.Attempt+1,
 			event.MaxAttempts,
 			event.Err,
@@ -172,13 +192,11 @@ func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {
 			r.output,
 			"FAILED note %d (%s): %v\n",
 			event.NoteID,
-			event.Operation,
+			description,
 			event.Err,
 		)
-	case ankitts.ProgressCompleted:
-		if event.Operation == ankitts.OperationUpdateNote {
-			fmt.Fprintf(r.output, "Generated note %d\n", event.NoteID)
-		}
+	case ankitts.ProgressItemCompleted:
+		fmt.Fprintf(r.output, "Generated note %d\n", event.NoteID)
 	}
 }
 

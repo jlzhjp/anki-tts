@@ -161,6 +161,7 @@ func (s *service) Generate(ctx context.Context, input ankitts.Input) (ankitts.Vo
 	if strings.TrimSpace(input.Text) == "" {
 		return nil, errors.New("generate OpenRouter speech: input text is required")
 	}
+	ankitts.ReportProgress(ctx, "Generating speech with "+s.model)
 
 	body, err := json.Marshal(speechRequest{
 		Model:          s.model,

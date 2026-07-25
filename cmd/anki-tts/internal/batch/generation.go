@@ -36,7 +36,8 @@ type finishedMsg struct {
 type progressTickMsg time.Time
 
 type noteProgress struct {
-	operation   ankitts.Operation
+	stage       string
+	description string
 	attempt     int
 	maxAttempts int
 	retryAt     time.Time
@@ -85,16 +86,24 @@ func (s *generationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case ankitts.ProgressEvent:
 		state := s.progress[msg.Index]
-		state.operation = msg.Operation
+		if msg.Kind == ankitts.ProgressStarted {
+			state.description = ""
+		}
+		if msg.Stage != "" {
+			state.stage = msg.Stage
+		}
+		if msg.Description != "" {
+			state.description = msg.Description
+		}
 		state.attempt = msg.Attempt
 		state.maxAttempts = msg.MaxAttempts
 		state.retryAt = msg.RetryAt
 		state.err = msg.Err
 		state.working =
 			msg.Kind == ankitts.ProgressStarted ||
+				msg.Kind == ankitts.ProgressUpdated ||
 				msg.Kind == ankitts.ProgressRetrying
-		if msg.Kind == ankitts.ProgressCompleted &&
-			msg.Operation == ankitts.OperationUpdateNote {
+		if msg.Kind == ankitts.ProgressItemCompleted {
 			state.done = true
 			state.working = false
 			state.err = nil
@@ -195,11 +204,15 @@ func (s *generationScreen) progressView() string {
 	)
 	for _, index := range active {
 		state := s.progress[index]
+		description := state.description
+		if description == "" {
+			description = state.stage
+		}
 		fmt.Fprintf(
 			&builder,
 			"\n  note %d · %s",
 			s.notes[index].NoteID,
-			state.operation,
+			description,
 		)
 		if !state.retryAt.IsZero() {
 			remaining := max(time.Until(state.retryAt), 0)
@@ -219,11 +232,15 @@ func (s *generationScreen) progressView() string {
 		builder.WriteString("\n\nErrors:")
 		for _, index := range failedNotes {
 			state := s.progress[index]
+			description := state.description
+			if description == "" {
+				description = state.stage
+			}
 			fmt.Fprintf(
 				&builder,
 				"\n  note %d · %s: %s",
 				s.notes[index].NoteID,
-				state.operation,
+				description,
 				red(state.err.Error()),
 			)
 		}

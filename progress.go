@@ -1,38 +1,31 @@
 package ankitts
 
 import (
+	"context"
 	"time"
 
 	"jlzhjp.dev/anki-tts/pipeline"
 )
 
-// ProgressKind identifies an application operation lifecycle event.
-type ProgressKind = pipeline.EventKind
+// ProgressKind identifies the meaning of an application progress event.
+type ProgressKind uint8
 
 const (
-	ProgressStarted   = pipeline.Started
-	ProgressRetrying  = pipeline.Retrying
-	ProgressCompleted = pipeline.Completed
-	ProgressFailed    = pipeline.Failed
-)
-
-// Operation describes the concrete action currently performed for a note.
-type Operation string
-
-const (
-	OperationSynthesize Operation = "generate voice"
-	OperationTransform  Operation = "process audio"
-	OperationStoreMedia Operation = "store media"
-	OperationUpdateNote Operation = "update note"
+	ProgressStarted ProgressKind = iota
+	ProgressUpdated
+	ProgressRetrying
+	ProgressCompleted
+	ProgressFailed
+	ProgressItemCompleted
 )
 
 // ProgressEvent is an immutable worker-to-observer status update.
 type ProgressEvent struct {
-	Kind      ProgressKind
-	Index     int
-	NoteID    int64
-	Stage     string
-	Operation Operation
+	Kind        ProgressKind
+	Index       int
+	NoteID      int64
+	Stage       string
+	Description string
 	// Attempt identifies the attempt being reported. For ProgressRetrying, it
 	// is the failed attempt; the next attempt is Attempt + 1.
 	Attempt     int
@@ -51,3 +44,55 @@ type ProgressReporter interface {
 type ProgressReporterFunc func(ProgressEvent)
 
 func (f ProgressReporterFunc) Report(event ProgressEvent) { f(event) }
+
+type progressContextKey struct{}
+
+type progressScope struct {
+	reporter ProgressReporter
+	event    ProgressEvent
+}
+
+func withProgress(ctx context.Context, reporter ProgressReporter, event ProgressEvent) context.Context {
+	if reporter == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, progressContextKey{}, progressScope{
+		reporter: reporter,
+		event:    event,
+	})
+}
+
+// ReportProgress publishes a component-owned description when ctx belongs to
+// an observed application execution. It is otherwise a no-op.
+func ReportProgress(ctx context.Context, description string) {
+	if description == "" {
+		return
+	}
+	reportProgress(ctx, ProgressUpdated, description)
+}
+
+func reportProgress(ctx context.Context, kind ProgressKind, description string) {
+	scope, ok := ctx.Value(progressContextKey{}).(progressScope)
+	if !ok || scope.reporter == nil {
+		return
+	}
+	event := scope.event
+	event.Kind = kind
+	event.Description = description
+	scope.reporter.Report(event)
+}
+
+func progressKind(kind pipeline.EventKind) ProgressKind {
+	switch kind {
+	case pipeline.Started:
+		return ProgressStarted
+	case pipeline.Retrying:
+		return ProgressRetrying
+	case pipeline.Completed:
+		return ProgressCompleted
+	case pipeline.Failed:
+		return ProgressFailed
+	default:
+		panic("unknown pipeline progress event kind")
+	}
+}

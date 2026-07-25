@@ -85,6 +85,7 @@ func (t *Transformer) Transform(ctx context.Context, voice ankitts.Voice) (ankit
 	if voice == nil {
 		return nil, errors.New("transform audio with FFmpeg: input voice is required")
 	}
+	ankitts.ReportProgress(ctx, "Converting audio to "+strings.ToUpper(t.format.Extension())+" with FFmpeg")
 	args := []string{"-hide_banner", "-loglevel", "error", "-i", "pipe:0"}
 	args = append(args, t.args...)
 	args = append(args, "-f", t.format.Muxer(), "pipe:1")

@@ -55,6 +55,7 @@ func (p Plan) Items() []PlannedNote {
 }
 
 type preparedJob struct {
+	index            int
 	noteID           int64
 	text             string
 	destinationField string
@@ -164,7 +165,7 @@ func (a *Application) Prepare(request GenerationRequest) (Plan, error) {
 			continue
 		}
 		jobs = append(jobs, preparedJob{
-			noteID: note.ID, text: text, destinationField: request.DestinationField,
+			index: len(jobs), noteID: note.ID, text: text, destinationField: request.DestinationField,
 			service: service, willOverwrite: strings.TrimSpace(destination.Value) != "",
 		})
 	}

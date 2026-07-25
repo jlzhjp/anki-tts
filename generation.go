@@ -98,7 +98,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 	}
 
 	serviceConfig := a.config[plan.serviceName]
-	synthesizeWithRetry, err := pipeline.Retry(serviceConfig.Retry, string(OperationSynthesize),
+	synthesizeWithRetry, err := pipeline.Retry(serviceConfig.Retry, "synthesize",
 		func(ctx context.Context, job preparedJob) (generationItem, error) {
 			audio, err := synthesize(ctx, job)
 			return generationItem{job: job, audio: audio}, err
@@ -107,14 +107,19 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		return result, err
 	}
 	jobs := pipeline.FromSlice(plan.jobs)
-	generated, err := pipeline.MapConcurrent(jobs, plan.serviceName, serviceConfig.Concurrency, synthesizeWithRetry)
+	generated, err := pipeline.MapConcurrent(jobs, plan.serviceName, serviceConfig.Concurrency,
+		func(ctx context.Context, job preparedJob) (generationItem, error) {
+			return synthesizeWithRetry(withProgress(ctx, options.Progress, ProgressEvent{
+				Index: job.index, NoteID: job.noteID, Stage: plan.serviceName,
+			}), job)
+		})
 	if err != nil {
 		return result, err
 	}
 	for _, configured := range a.processors {
 		processor := configured
 		processorConfig := a.config[processor.Name]
-		processWithRetry, retryErr := pipeline.Retry(processorConfig.Retry, string(OperationTransform),
+		processWithRetry, retryErr := pipeline.Retry(processorConfig.Retry, "transform",
 			func(ctx context.Context, item generationItem) (generationItem, error) {
 				audio, err := processAudio(ctx, processor.Transformer, item.audio)
 				return generationItem{job: item.job, audio: audio}, err
@@ -122,14 +127,20 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		if retryErr != nil {
 			return result, retryErr
 		}
-		generated, err = pipeline.MapConcurrent(generated, processor.Name, processorConfig.Concurrency, processWithRetry)
+		generated, err = pipeline.MapConcurrent(generated, processor.Name, processorConfig.Concurrency,
+			func(ctx context.Context, item generationItem) (generationItem, error) {
+				return processWithRetry(withProgress(ctx, options.Progress, ProgressEvent{
+					Index: item.job.index, NoteID: item.job.noteID, Stage: processor.Name,
+				}), item)
+			})
 		if err != nil {
 			return result, err
 		}
 	}
 	persistenceConfig := a.config[persistenceStage]
-	storeWithRetry, err := pipeline.Retry(persistenceConfig.Retry, string(OperationStoreMedia),
+	storeWithRetry, err := pipeline.Retry(persistenceConfig.Retry, "store media",
 		func(ctx context.Context, item generationItem) (storedItem, error) {
+			ReportProgress(ctx, "Storing media in Anki")
 			filename := audioFilename(item)
 			storedFilename, err := a.anki.StoreMediaFile(ctx, filename, item.audio.data)
 			return storedItem{item: item, filename: storedFilename}, err
@@ -137,8 +148,9 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 	if err != nil {
 		return result, err
 	}
-	updateWithRetry, err := pipeline.Retry(persistenceConfig.Retry, string(OperationUpdateNote),
+	updateWithRetry, err := pipeline.Retry(persistenceConfig.Retry, "update note",
 		func(ctx context.Context, stored storedItem) (GenerateResult, error) {
+			ReportProgress(ctx, "Updating note in Anki")
 			tag := "[sound:" + stored.filename + "]"
 			err := a.anki.UpdateNote(ctx, anki.NoteUpdate{
 				ID:     stored.item.job.noteID,
@@ -171,9 +183,15 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		if err != nil {
 			return GenerateResult{}, &PartialPersistenceError{Filename: stored.filename, Err: err}
 		}
+		reportProgress(commitCtx, ProgressItemCompleted, "")
 		return generated, nil
 	}
-	persisted, err := pipeline.MapConcurrent(generated, persistenceStage, persistenceConfig.Concurrency, persist)
+	persisted, err := pipeline.MapConcurrent(generated, persistenceStage, persistenceConfig.Concurrency,
+		func(ctx context.Context, item generationItem) (GenerateResult, error) {
+			return persist(withProgress(ctx, options.Progress, ProgressEvent{
+				Index: item.job.index, NoteID: item.job.noteID, Stage: persistenceStage,
+			}), item)
+		})
 	if err != nil {
 		return result, err
 	}
@@ -183,8 +201,8 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		}
 		job := plan.jobs[event.Index]
 		options.Progress.Report(ProgressEvent{
-			Kind: event.Kind, Index: event.Index, NoteID: job.noteID,
-			Stage: event.Stage, Operation: Operation(event.Operation), Attempt: event.Attempt,
+			Kind: progressKind(event.Kind), Index: event.Index, NoteID: job.noteID,
+			Stage: event.Stage, Attempt: event.Attempt,
 			MaxAttempts: event.MaxAttempts, RetryAt: event.RetryAt, Err: event.Err,
 		})
 	})

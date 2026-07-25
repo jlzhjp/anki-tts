@@ -58,17 +58,31 @@ func TestTransformationDeterminesUploadedMedia(t *testing.T) {
 
 func TestProgressUsesConfiguredComponentNames(t *testing.T) {
 	client := &fakeAnki{}
-	provider := &fakeTTS{voice: voice("provider audio", "wav")}
-	transformer := &fakeTransformer{output: "transformed audio", format: "mp3"}
+	provider := &fakeTTS{
+		voice:       voice("provider audio", "wav"),
+		description: "Generating speech with test-model",
+	}
+	transformer := &fakeTransformer{
+		output: "transformed audio", format: "mp3",
+		description: "Converting audio to MP3 with test processor",
+	}
 	app := newTestApplication(t, client, provider, transformer)
 	plan, err := app.Prepare(spec())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var stages []string
+	var descriptions []string
+	var completed int
 	_, err = app.Execute(context.Background(), plan, ExecuteOptions{Progress: ProgressReporterFunc(func(event ProgressEvent) {
 		if event.Kind == ProgressStarted {
 			stages = append(stages, event.Stage)
+		}
+		if event.Kind == ProgressUpdated {
+			descriptions = append(descriptions, event.Description)
+		}
+		if event.Kind == ProgressItemCompleted {
+			completed++
 		}
 	})})
 	if err != nil {
@@ -77,6 +91,18 @@ func TestProgressUsesConfiguredComponentNames(t *testing.T) {
 	want := []string{"openrouter", "ffmpeg", "anki", "anki"}
 	if fmt.Sprint(stages) != fmt.Sprint(want) {
 		t.Fatalf("stages=%v want=%v", stages, want)
+	}
+	wantDescriptions := []string{
+		"Generating speech with test-model",
+		"Converting audio to MP3 with test processor",
+		"Storing media in Anki",
+		"Updating note in Anki",
+	}
+	if fmt.Sprint(descriptions) != fmt.Sprint(wantDescriptions) {
+		t.Fatalf("descriptions=%v want=%v", descriptions, wantDescriptions)
+	}
+	if completed != 1 {
+		t.Fatalf("item completion events=%d", completed)
 	}
 }
 
@@ -394,8 +420,9 @@ func (f *fakeAnki) UpdateNote(ctx context.Context, update anki.NoteUpdate) error
 }
 
 type fakeTTS struct {
-	input Input
-	voice Voice
+	input       Input
+	voice       Voice
+	description string
 }
 
 type cancelingTTS struct {
@@ -407,16 +434,18 @@ func (s cancelingTTS) Generate(ctx context.Context, _ Input) (Voice, error) {
 	return nil, ctx.Err()
 }
 
-func (f *fakeTTS) Generate(_ context.Context, input Input) (Voice, error) {
+func (f *fakeTTS) Generate(ctx context.Context, input Input) (Voice, error) {
+	ReportProgress(ctx, f.description)
 	f.input = input
 	return f.voice, nil
 }
 
 type fakeTransformer struct {
-	output    string
-	format    string
-	err       error
-	streamErr error
+	output      string
+	format      string
+	err         error
+	streamErr   error
+	description string
 }
 
 type appendTransformer struct{ suffix string }
@@ -433,7 +462,8 @@ func (t appendTransformer) Transform(_ context.Context, input Voice) (Voice, err
 	}, nil
 }
 
-func (f *fakeTransformer) Transform(_ context.Context, input Voice) (Voice, error) {
+func (f *fakeTransformer) Transform(ctx context.Context, input Voice) (Voice, error) {
+	ReportProgress(ctx, f.description)
 	_, _ = io.ReadAll(input)
 	if f.err != nil {
 		_ = input.Close()
