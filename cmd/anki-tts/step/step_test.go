@@ -18,7 +18,7 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 		client,
 		note,
 		nil,
-		Display{Step: 4},
+		Display{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 		client,
 		note,
 		screen,
-		Display{Step: 4},
+		Display{},
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -7,9 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	ankitts "jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/batch"
 	"jlzhjp.dev/anki-tts/pipeline"
 )
 
@@ -30,7 +29,7 @@ func TestBatchConfirmsOverwriteAndProcessesEveryNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	err = batch.Run(context.Background(), app, batch.Options{
+	err = runApplication(context.Background(), app, runOptions{
 		FromField: "Front", ToField: "Audio", Service: "Test",
 	}, strings.NewReader("yes\ny\n"), &output)
 	if err != nil {

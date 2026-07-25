@@ -13,17 +13,21 @@ var ErrBack = errors.New("back")
 
 // Display describes how the host presents a screen.
 type Display struct {
-	Step    int
 	Context string
 	Resume  bool
+	// CancelIsError preserves user cancellation as a command error while the
+	// screen is active.
+	CancelIsError bool
 }
 
-// Screen is the model contract required by the interactive host.
+// Screen is the model contract required by the terminal workflow host.
 type Screen interface {
 	tea.Model
-	SetSize(int, int)
 	Filtering() bool
 }
+
+// Resizable is implemented by screens that adapt to terminal dimensions.
+type Resizable interface{ SetSize(int, int) }
 
 // Client presents screens on behalf of sequential workflow steps.
 type Client interface {

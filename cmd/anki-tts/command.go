@@ -8,9 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	ankitts "jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/batch"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/interactive"
+	"jlzhjp.dev/anki-tts"
 )
 
 type commandOptions struct {
@@ -52,15 +50,9 @@ field matchers must match. With no selectors, batch mode considers every note.`,
 			if err != nil {
 				return err
 			}
-			if options.interactive {
-				return interactive.Run(cmd.Context(), app, interactive.Options{
-					Selector: selector, FromField: options.fromField, ToField: options.toField,
-					Service: options.service, Yes: options.yes,
-				}, input, output)
-			}
-			return batch.Run(cmd.Context(), app, batch.Options{
+			return runApplication(cmd.Context(), app, runOptions{
 				Selector: selector, FromField: options.fromField, ToField: options.toField,
-				Service: options.service, Yes: options.yes,
+				Service: options.service, Yes: options.yes, Interactive: options.interactive,
 			}, input, output)
 		},
 	}

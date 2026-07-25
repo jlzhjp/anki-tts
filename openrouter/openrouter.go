@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	ankitts "jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/internal/streamutil"
 )
 

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	ankitts "jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/internal/streamutil"
 )
 

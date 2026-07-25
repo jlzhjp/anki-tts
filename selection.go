@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -58,7 +59,8 @@ func (s *Application) SelectNotes(ctx context.Context, selector NoteSelector) ([
 }
 
 func matchesNote(note anki.Note, selector NoteSelector) bool {
-	if len(selector.NoteTemplates) > 0 && !contains(selector.NoteTemplates, note.ModelName) {
+	if len(selector.NoteTemplates) > 0 &&
+		!slices.Contains(selector.NoteTemplates, note.ModelName) {
 		return false
 	}
 	for _, matcher := range selector.FieldMatchers {
@@ -72,15 +74,6 @@ func matchesNote(note anki.Note, selector NoteSelector) bool {
 		}
 	}
 	return true
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 // ParseFieldMatcher parses FIELD=REGEX syntax.

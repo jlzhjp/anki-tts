@@ -7,7 +7,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	ankitts "jlzhjp.dev/anki-tts"
+	"jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/anki"
 	"jlzhjp.dev/anki-tts/ffmpeg"
 	"jlzhjp.dev/anki-tts/openrouter"
