@@ -1,4 +1,4 @@
-package step
+package terminal
 
 import (
 	"context"
@@ -49,15 +49,18 @@ type FailedMsg struct {
 	Retry tea.Cmd
 }
 
-func complete(value any) tea.Cmd {
+// Complete returns a command that sends a screen result to the host.
+func Complete(value any) tea.Cmd {
 	return func() tea.Msg { return CompletedMsg{Value: value} }
 }
 
-func fail(err error, retry tea.Cmd) tea.Cmd {
+// Fail returns a command that asks the host to present a retryable failure.
+func Fail(err error, retry tea.Cmd) tea.Cmd {
 	return func() tea.Msg { return FailedMsg{Err: err, Retry: retry} }
 }
 
-func prompt[T any](ctx context.Context, client Client, screen Screen, display Display) (T, error) {
+// Prompt presents a screen and verifies the type of its result.
+func Prompt[T any](ctx context.Context, client Client, screen Screen, display Display) (T, error) {
 	var zero T
 	value, err := client.Prompt(ctx, screen, display)
 	if err != nil {

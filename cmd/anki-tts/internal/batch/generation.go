@@ -1,4 +1,4 @@
-package step
+package batch
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"jlzhjp.dev/anki-tts"
 )
 
-// BatchExecutionApplication is the capability required by batch generation.
-type BatchExecutionApplication interface {
+// executionApplication is the capability required by batch generation.
+type executionApplication interface {
 	Execute(
 		context.Context,
 		ankitts.Plan,
@@ -22,18 +22,18 @@ type BatchExecutionApplication interface {
 	) (ankitts.BatchResult, error)
 }
 
-// BatchOutcome contains the complete result of a batch execution.
-type BatchOutcome struct {
-	Result ankitts.BatchResult
-	Err    error
-}
-
-type batchFinishedMsg struct {
+// outcome contains the complete result of a batch execution.
+type outcome struct {
 	result ankitts.BatchResult
 	err    error
 }
 
-type batchProgressTickMsg time.Time
+type finishedMsg struct {
+	result ankitts.BatchResult
+	err    error
+}
+
+type progressTickMsg time.Time
 
 type noteProgress struct {
 	operation   ankitts.Operation
@@ -45,10 +45,10 @@ type noteProgress struct {
 	done        bool
 }
 
-// BatchGenerationScreen executes a plan and displays progress and its summary.
-type BatchGenerationScreen struct {
+// generationScreen executes a plan and displays progress and its summary.
+type generationScreen struct {
 	ctx          context.Context
-	app          BatchExecutionApplication
+	app          executionApplication
 	plan         ankitts.Plan
 	notes        []ankitts.PlannedNote
 	events       chan ankitts.ProgressEvent
@@ -58,15 +58,15 @@ type BatchGenerationScreen struct {
 	finished     bool
 }
 
-// GenerateBatch executes a prepared batch while presenting progress.
-func GenerateBatch(
+// generate executes a prepared batch while presenting progress.
+func generate(
 	ctx context.Context,
-	client Client,
-	app BatchExecutionApplication,
+	client client,
+	app executionApplication,
 	plan ankitts.Plan,
-	display Display,
-) (BatchOutcome, error) {
-	screen := &BatchGenerationScreen{
+	display display,
+) (outcome, error) {
+	screen := &generationScreen{
 		ctx:      ctx,
 		app:      app,
 		plan:     plan,
@@ -74,14 +74,14 @@ func GenerateBatch(
 		events:   make(chan ankitts.ProgressEvent, 256),
 		progress: make(map[int]noteProgress),
 	}
-	return prompt[BatchOutcome](ctx, client, screen, display)
+	return prompt[outcome](ctx, client, screen, display)
 }
 
-func (s *BatchGenerationScreen) Init() tea.Cmd {
-	return tea.Batch(s.execute(), s.waitForProgress(), batchProgressTick())
+func (s *generationScreen) Init() tea.Cmd {
+	return tea.Batch(s.execute(), s.waitForProgress(), progressTick())
 }
 
-func (s *BatchGenerationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+func (s *generationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case ankitts.ProgressEvent:
 		state := s.progress[msg.Index]
@@ -102,69 +102,69 @@ func (s *BatchGenerationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		s.progress[msg.Index] = state
 		return s, s.waitForProgress()
 
-	case batchProgressTickMsg:
+	case progressTickMsg:
 		if !s.finished {
-			return s, batchProgressTick()
+			return s, progressTick()
 		}
 
-	case batchFinishedMsg:
+	case finishedMsg:
 		s.finished = true
 		s.result = msg.result
 		s.executionErr = msg.err
-		return s, complete(BatchOutcome{Result: msg.result, Err: msg.err})
+		return s, complete(outcome{result: msg.result, err: msg.err})
 	}
 	return s, nil
 }
 
-func (s *BatchGenerationScreen) View() tea.View {
+func (s *generationScreen) View() tea.View {
 	if s.finished {
 		return tea.NewView(s.summaryView())
 	}
 	return tea.NewView(s.progressView())
 }
 
-func (*BatchGenerationScreen) Filtering() bool    { return false }
-func (*BatchGenerationScreen) BackDisabled() bool { return true }
+func (*generationScreen) Filtering() bool    { return false }
+func (*generationScreen) BackDisabled() bool { return true }
 
-func (s *BatchGenerationScreen) execute() tea.Cmd {
+func (s *generationScreen) execute() tea.Cmd {
 	return func() tea.Msg {
 		result, err := s.app.Execute(s.ctx, s.plan, ankitts.ExecuteOptions{
-			Progress: batchProgressReporter{ctx: s.ctx, events: s.events},
+			Progress: progressReporter{ctx: s.ctx, events: s.events},
 		})
-		return batchFinishedMsg{result: result, err: err}
+		return finishedMsg{result: result, err: err}
 	}
 }
 
-func (s *BatchGenerationScreen) waitForProgress() tea.Cmd {
+func (s *generationScreen) waitForProgress() tea.Cmd {
 	return func() tea.Msg {
 		select {
 		case event := <-s.events:
 			return event
 		case <-s.ctx.Done():
-			return batchFinishedMsg{err: s.ctx.Err()}
+			return finishedMsg{err: s.ctx.Err()}
 		}
 	}
 }
 
-func batchProgressTick() tea.Cmd {
+func progressTick() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(now time.Time) tea.Msg {
-		return batchProgressTickMsg(now)
+		return progressTickMsg(now)
 	})
 }
 
-type batchProgressReporter struct {
+type progressReporter struct {
 	ctx    context.Context
 	events chan<- ankitts.ProgressEvent
 }
 
-func (r batchProgressReporter) Report(event ankitts.ProgressEvent) {
+func (r progressReporter) Report(event ankitts.ProgressEvent) {
 	select {
 	case r.events <- event:
 	case <-r.ctx.Done():
 	}
 }
 
-func (s *BatchGenerationScreen) progressView() string {
+func (s *generationScreen) progressView() string {
 	active := make([]int, 0, len(s.progress))
 	failedNotes := make([]int, 0)
 	succeeded, failed := 0, 0
@@ -232,7 +232,7 @@ func (s *BatchGenerationScreen) progressView() string {
 	return builder.String()
 }
 
-func (s *BatchGenerationScreen) summaryView() string {
+func (s *generationScreen) summaryView() string {
 	succeeded := 0
 	var failures []ankitts.ItemResult
 	for _, item := range s.result.Items {

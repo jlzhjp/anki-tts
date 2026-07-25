@@ -1,4 +1,4 @@
-package step
+package interactive
 
 import (
 	"sort"

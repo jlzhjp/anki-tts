@@ -1,4 +1,4 @@
-package step
+package interactive
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"jlzhjp.dev/anki-tts/anki"
 )
 
-// DestinationFieldScreen displays fields that can receive generated audio.
-type DestinationFieldScreen struct{ selectionScreen }
+// destinationFieldScreen displays fields that can receive generated audio.
+type destinationFieldScreen struct{ selectionScreen }
 
-func newDestinationFieldScreen(note anki.Note) *DestinationFieldScreen {
-	return &DestinationFieldScreen{
+func newDestinationFieldScreen(note anki.Note) *destinationFieldScreen {
+	return &destinationFieldScreen{
 		selectionScreen: newSelectionScreen(
 			"Select the destination field",
 			fieldListItems(note, false),
@@ -20,14 +20,14 @@ func newDestinationFieldScreen(note anki.Note) *DestinationFieldScreen {
 	}
 }
 
-// ChooseDestinationField presents or resumes destination-field selection.
-func ChooseDestinationField(
+// chooseDestinationField presents or resumes destination-field selection.
+func chooseDestinationField(
 	ctx context.Context,
-	client Client,
+	client client,
 	note anki.Note,
-	previous *DestinationFieldScreen,
-	display Display,
-) (string, *DestinationFieldScreen, error) {
+	previous *destinationFieldScreen,
+	display display,
+) (string, *destinationFieldScreen, error) {
 	display.Resume = previous != nil
 	if previous == nil {
 		previous = newDestinationFieldScreen(note)
@@ -36,9 +36,9 @@ func ChooseDestinationField(
 	return value, previous, err
 }
 
-func (s *DestinationFieldScreen) Init() tea.Cmd { return nil }
+func (s *destinationFieldScreen) Init() tea.Cmd { return nil }
 
-func (s *DestinationFieldScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+func (s *destinationFieldScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok && key.String() == "enter" && !s.Filtering() {
 		if selected, ok := s.selected(); ok {
 			return s, complete(selected.value.(string))

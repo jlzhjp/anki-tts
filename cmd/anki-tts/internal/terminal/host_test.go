@@ -1,4 +1,4 @@
-package main
+package terminal
 
 import (
 	"bytes"
@@ -9,8 +9,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
 )
 
 func TestScreenHostPreservesChildViewAndRemovesStepCounter(t *testing.T) {
@@ -20,7 +18,7 @@ func TestScreenHostPreservesChildViewAndRemovesStepCounter(t *testing.T) {
 		ctx,
 		cancel,
 		make(chan screenRequest),
-		make(chan workflowResult),
+		make(chan Result),
 		false,
 	)
 	screen := &fakeScreen{altScreen: true}
@@ -29,7 +27,7 @@ func TestScreenHostPreservesChildViewAndRemovesStepCounter(t *testing.T) {
 	host.Update(screenRequestedMsg{request: screenRequest{
 		screen: screen,
 		reply:  reply,
-		display: step.Display{
+		display: Display{
 			Context: "Deck: Japanese",
 		},
 	}})
@@ -57,7 +55,7 @@ func TestScreenHostCanForceAlternateScreen(t *testing.T) {
 		ctx,
 		cancel,
 		make(chan screenRequest),
-		make(chan workflowResult),
+		make(chan Result),
 		true,
 	)
 	host.active = &fakeScreen{}
@@ -74,7 +72,7 @@ func TestScreenHostCompletesWithoutDiscardingFinalView(t *testing.T) {
 		ctx,
 		cancel,
 		make(chan screenRequest),
-		make(chan workflowResult),
+		make(chan Result),
 		false,
 	)
 	screen := &fakeScreen{}
@@ -99,13 +97,13 @@ func TestPresentedWorkflowErrorSkipsErrorOverlay(t *testing.T) {
 		ctx,
 		cancel,
 		make(chan screenRequest),
-		make(chan workflowResult),
+		make(chan Result),
 		false,
 	)
 	want := errors.New("batch failed")
 
 	updated, cmd := host.Update(workflowFinishedMsg{
-		result: workflowResult{err: want, errorPresented: true},
+		result: Result{Err: want, ErrorPresented: true},
 	})
 	host = updated.(*screenHost)
 
@@ -121,10 +119,10 @@ func TestScreenHostPreservesBatchExecutionCancellation(t *testing.T) {
 		ctx,
 		cancel,
 		make(chan screenRequest),
-		make(chan workflowResult),
+		make(chan Result),
 		false,
 	)
-	host.active = &step.BatchGenerationScreen{}
+	host.active = &backDisabledScreen{}
 	host.activeCancelIsError = true
 
 	host.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
@@ -144,13 +142,13 @@ func TestRunTerminalReturnsPresentedWorkflowError(t *testing.T) {
 	defer cancel()
 	var output bytes.Buffer
 
-	err := runTerminal(
+	err := Run(
 		ctx,
 		strings.NewReader(""),
 		&output,
 		false,
-		func(context.Context, step.Client) workflowResult {
-			return workflowResult{err: want, errorPresented: true}
+		func(context.Context, Client) Result {
+			return Result{Err: want, ErrorPresented: true}
 		},
 	)
 
@@ -178,3 +176,7 @@ func (s *fakeScreen) SetSize(width, height int) {
 	s.width, s.height = width, height
 }
 func (*fakeScreen) Filtering() bool { return false }
+
+type backDisabledScreen struct{ fakeScreen }
+
+func (*backDisabledScreen) BackDisabled() bool { return true }

@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
+
 	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
+	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/batch"
+	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/interactive"
+	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/terminal"
 )
 
 type application interface {
@@ -40,9 +45,15 @@ func runApplication(
 		return fmt.Errorf("application is not configured")
 	}
 	if options.Interactive {
-		return runTerminal(ctx, input, output, true, func(ctx context.Context, client step.Client) workflowResult {
-			return workflowResult{
-				err: runInteractiveWorkflow(ctx, client, app, options),
+		return terminal.Run(ctx, input, output, true, func(ctx context.Context, client terminal.Client) terminal.Result {
+			return terminal.Result{
+				Err: interactive.Run(ctx, client, app, interactive.Options{
+					Query:     options.Query,
+					FromField: options.FromField,
+					ToField:   options.ToField,
+					Service:   options.Service,
+					Yes:       options.Yes,
+				}),
 			}
 		})
 	}
@@ -57,12 +68,23 @@ func runApplication(
 		fmt.Fprintln(output, "No notes matched the filter.")
 		return nil
 	}
-	if !isTerminal(input) || !isTerminal(output) {
-		return runPlainBatch(ctx, app, options, selection, input, output)
+	batchOptions := batch.Options{
+		FromField: options.FromField,
+		ToField:   options.ToField,
+		Service:   options.Service,
+		Yes:       options.Yes,
 	}
-	return runTerminal(ctx, input, output, false, func(ctx context.Context, client step.Client) workflowResult {
-		return runBatchWorkflow(ctx, client, app, options, selection)
+	if !isTerminal(input) || !isTerminal(output) {
+		return batch.RunPlain(ctx, app, batchOptions, selection, input, output)
+	}
+	return terminal.Run(ctx, input, output, false, func(ctx context.Context, client terminal.Client) terminal.Result {
+		return batch.Run(ctx, client, app, batchOptions, selection)
 	})
+}
+
+func isTerminal(stream any) bool {
+	file, ok := stream.(*os.File)
+	return ok && term.IsTerminal(file.Fd())
 }
 
 func validateBatchOptions(options runOptions) error {

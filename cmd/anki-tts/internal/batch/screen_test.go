@@ -1,4 +1,4 @@
-package step
+package batch
 
 import (
 	"context"
@@ -23,7 +23,7 @@ func TestBatchConfirmationChoosesAlternateScreenFromHeight(t *testing.T) {
 		{name: "needs alternate screen", count: 20, height: 10, want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			screen := &BatchConfirmationScreen{
+			screen := &confirmationScreen{
 				noteIDs: noteIDs(test.count),
 				height:  24,
 			}
@@ -44,7 +44,7 @@ func TestBatchConfirmationChoosesAlternateScreenFromHeight(t *testing.T) {
 }
 
 func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
-	screen := &BatchGenerationScreen{
+	screen := &generationScreen{
 		notes:    plannedNotes(1, false),
 		progress: make(map[int]noteProgress),
 	}
@@ -58,7 +58,7 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 		RetryAt:     time.Now().Add(time.Second),
 		Err:         errors.New("rate limited"),
 	})
-	screen = updated.(*BatchGenerationScreen)
+	screen = updated.(*generationScreen)
 	for _, want := range []string{
 		"note 1",
 		"generate voice",
@@ -74,12 +74,12 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 		}
 	}
 
-	updated, cmd := screen.Update(batchFinishedMsg{
+	updated, cmd := screen.Update(finishedMsg{
 		result: ankitts.BatchResult{
 			Items: []ankitts.ItemResult{{NoteID: 1}},
 		},
 	})
-	screen = updated.(*BatchGenerationScreen)
+	screen = updated.(*generationScreen)
 	if cmd == nil {
 		t.Fatal("finished batch did not complete its workflow step")
 	}
@@ -89,32 +89,32 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 	) {
 		t.Fatalf("summary=%s", got)
 	}
-	if _, ok := cmd().(CompletedMsg); !ok {
+	if _, ok := cmd().(completedMsg); !ok {
 		t.Fatalf("completion message=%T", cmd())
 	}
 }
 
 func TestBatchConfirmationAcceptsAndRejects(t *testing.T) {
-	screen := &BatchConfirmationScreen{}
+	screen := &confirmationScreen{}
 	_, accept := screen.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if msg := accept(); msg.(CompletedMsg).Value != true {
+	if msg := accept(); msg.(completedMsg).Value != true {
 		t.Fatalf("accept message=%+v", msg)
 	}
 	_, reject := screen.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	if msg := reject(); msg.(CompletedMsg).Value != false {
+	if msg := reject(); msg.(completedMsg).Value != false {
 		t.Fatalf("reject message=%+v", msg)
 	}
 }
 
 func TestBatchStepFunctionsConstructTypedScreens(t *testing.T) {
 	confirmationClient := &fakeClient{value: true}
-	accepted, confirmation, err := ConfirmBatch(
+	accepted, confirmation, err := confirm(
 		context.Background(),
 		confirmationClient,
 		[]int64{1},
 		false,
 		nil,
-		Display{},
+		display{},
 	)
 	if err != nil || !accepted || confirmation == nil {
 		t.Fatalf(
@@ -125,13 +125,13 @@ func TestBatchStepFunctionsConstructTypedScreens(t *testing.T) {
 		)
 	}
 
-	generationClient := &fakeClient{value: BatchOutcome{}}
-	_, err = GenerateBatch(
+	generationClient := &fakeClient{value: outcome{}}
+	_, err = generate(
 		context.Background(),
 		generationClient,
 		&fakeBatchExecution{},
 		ankitts.Plan{},
-		Display{CancelIsError: true},
+		display{CancelIsError: true},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -147,14 +147,14 @@ func TestBatchGenerationExecutesWithProgressReporter(t *testing.T) {
 			Items: []ankitts.ItemResult{{NoteID: 1}},
 		},
 	}
-	screen := &BatchGenerationScreen{
+	screen := &generationScreen{
 		ctx:      context.Background(),
 		app:      app,
 		events:   make(chan ankitts.ProgressEvent, 1),
 		progress: make(map[int]noteProgress),
 	}
 
-	finished := screen.execute()().(batchFinishedMsg)
+	finished := screen.execute()().(finishedMsg)
 
 	if finished.err != nil || len(finished.result.Items) != 1 {
 		t.Fatalf("finished=%+v", finished)

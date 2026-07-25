@@ -1,4 +1,4 @@
-package step
+package interactive
 
 import (
 	"context"
@@ -9,27 +9,27 @@ import (
 	"jlzhjp.dev/anki-tts/anki"
 )
 
-// SourceFieldScreen displays non-empty fields that can provide speech text.
-type SourceFieldScreen struct{ selectionScreen }
+// sourceFieldScreen displays non-empty fields that can provide speech text.
+type sourceFieldScreen struct{ selectionScreen }
 
-func newSourceFieldScreen(note anki.Note) (*SourceFieldScreen, error) {
+func newSourceFieldScreen(note anki.Note) (*sourceFieldScreen, error) {
 	fields := fieldListItems(note, true)
 	if len(fields) == 0 {
 		return nil, errors.New("this note has no non-empty source fields")
 	}
-	return &SourceFieldScreen{
+	return &sourceFieldScreen{
 		selectionScreen: newSelectionScreen("Select the source field", fields),
 	}, nil
 }
 
-// ChooseSourceField presents or resumes source-field selection.
-func ChooseSourceField(
+// chooseSourceField presents or resumes source-field selection.
+func chooseSourceField(
 	ctx context.Context,
-	client Client,
+	client client,
 	note anki.Note,
-	previous *SourceFieldScreen,
-	display Display,
-) (string, *SourceFieldScreen, error) {
+	previous *sourceFieldScreen,
+	display display,
+) (string, *sourceFieldScreen, error) {
 	display.Resume = previous != nil
 	if previous == nil {
 		var err error
@@ -42,9 +42,9 @@ func ChooseSourceField(
 	return value, previous, err
 }
 
-func (s *SourceFieldScreen) Init() tea.Cmd { return nil }
+func (s *sourceFieldScreen) Init() tea.Cmd { return nil }
 
-func (s *SourceFieldScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+func (s *sourceFieldScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok && key.String() == "enter" && !s.Filtering() {
 		if selected, ok := s.selected(); ok {
 			return s, complete(selected.value.(string))

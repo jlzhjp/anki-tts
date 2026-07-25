@@ -1,4 +1,4 @@
-package main
+package batch
 
 import (
 	"bufio"
@@ -6,20 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/x/term"
-
 	"jlzhjp.dev/anki-tts"
 )
 
-func prepareBatch(
+func prepare(
 	ctx context.Context,
-	app application,
-	options runOptions,
+	app Application,
+	options Options,
 	selection ankitts.NoteSelection,
 ) (ankitts.Plan, error) {
 	return app.Prepare(ankitts.GenerationRequest{
@@ -30,10 +27,11 @@ func prepareBatch(
 	})
 }
 
-func runPlainBatch(
+// RunPlain executes a batch workflow without the terminal UI.
+func RunPlain(
 	ctx context.Context,
-	app application,
-	options runOptions,
+	app Application,
+	options Options,
 	selection ankitts.NoteSelection,
 	input io.Reader,
 	output io.Writer,
@@ -52,7 +50,7 @@ func runPlainBatch(
 		}
 	}
 
-	plan, err := prepareBatch(ctx, app, options, selection)
+	plan, err := prepare(ctx, app, options, selection)
 	if err != nil {
 		return err
 	}
@@ -104,10 +102,10 @@ func reportBatchResult(
 			fmt.Fprintf(output, "  note %d: %v\n", item.NoteID, item.Err)
 		}
 	}
-	return batchResultError(result, executionErr)
+	return resultError(result, executionErr)
 }
 
-func batchResultError(result ankitts.BatchResult, executionErr error) error {
+func resultError(result ankitts.BatchResult, executionErr error) error {
 	if executionErr != nil {
 		return executionErr
 	}
@@ -147,11 +145,6 @@ func overwriteNoteIDs(notes []ankitts.PlannedNote) []int64 {
 
 func red(value string) string {
 	return "\x1b[1;31m" + value + "\x1b[0m"
-}
-
-func isTerminal(stream any) bool {
-	file, ok := stream.(*os.File)
-	return ok && term.IsTerminal(file.Fd())
 }
 
 type plainProgressReporter struct {

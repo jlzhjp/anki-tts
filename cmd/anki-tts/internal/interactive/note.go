@@ -1,4 +1,4 @@
-package step
+package interactive
 
 import (
 	"context"
@@ -19,12 +19,12 @@ const (
 	interactiveNotePrefetchThreshold = 10
 )
 
-type NoteSource interface {
+type noteSource interface {
 	SearchNotes(context.Context, ankitts.NoteQuery) (ankitts.NoteSelection, error)
 	Notes(context.Context, ankitts.NoteSelection, ankitts.NoteLoadOptions) iter.Seq[ankitts.NoteResult]
 }
 
-type NoteOptions struct {
+type noteOptions struct {
 	Query            ankitts.NoteQuery
 	SourceField      string
 	DestinationField string
@@ -52,12 +52,12 @@ type noteCandidate struct {
 	invalid string
 }
 
-// NoteScreen progressively displays notes matching an Anki search.
-type NoteScreen struct {
+// noteScreen progressively displays notes matching an Anki search.
+type noteScreen struct {
 	selectionScreen
 	ctx             context.Context
-	source          NoteSource
-	options         NoteOptions
+	source          noteSource
+	options         noteOptions
 	notes           []anki.Note
 	nextResult      func() (ankitts.NoteResult, bool)
 	stopIterator    func()
@@ -69,8 +69,8 @@ type NoteScreen struct {
 	exhausted       bool
 }
 
-func newNoteScreen(ctx context.Context, source NoteSource, options NoteOptions) *NoteScreen {
-	screen := &NoteScreen{
+func newNoteScreen(ctx context.Context, source noteSource, options noteOptions) *noteScreen {
+	screen := &noteScreen{
 		selectionScreen: newSelectionScreen("Loading notes", nil),
 		ctx:             ctx,
 		source:          source,
@@ -80,15 +80,15 @@ func newNoteScreen(ctx context.Context, source NoteSource, options NoteOptions) 
 	return screen
 }
 
-// ChooseNote presents or resumes progressive note selection.
-func ChooseNote(
+// chooseNote presents or resumes progressive note selection.
+func chooseNote(
 	ctx context.Context,
-	client Client,
-	source NoteSource,
-	options NoteOptions,
-	previous *NoteScreen,
-	display Display,
-) (anki.Note, *NoteScreen, error) {
+	client client,
+	source noteSource,
+	options noteOptions,
+	previous *noteScreen,
+	display display,
+) (anki.Note, *noteScreen, error) {
 	display.Resume = previous != nil && !previous.reload
 	if previous == nil {
 		previous = newNoteScreen(ctx, source, options)
@@ -98,8 +98,8 @@ func ChooseNote(
 	return value, previous, err
 }
 
-// RefreshNoteList reloads one generated note without restarting the search.
-func RefreshNoteList(screen *NoteScreen, status string, preferredNoteID int64) {
+// refreshNoteList reloads one generated note without restarting the search.
+func refreshNoteList(screen *noteScreen, status string, preferredNoteID int64) {
 	screen.status = status
 	screen.preferredNoteID = preferredNoteID
 	screen.busy = true
@@ -107,14 +107,14 @@ func RefreshNoteList(screen *NoteScreen, status string, preferredNoteID int64) {
 	screen.list.Title = "Refreshing note"
 }
 
-func (s *NoteScreen) Init() tea.Cmd {
+func (s *noteScreen) Init() tea.Cmd {
 	if s.preferredNoteID != 0 && len(s.notes) > 0 {
 		return tea.Batch(s.list.StartSpinner(), s.refresh())
 	}
 	return tea.Batch(s.list.StartSpinner(), s.start())
 }
 
-func (s *NoteScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+func (s *noteScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case noteStreamStartedMsg:
 		if msg.err != nil {
@@ -200,13 +200,13 @@ func (s *NoteScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return s, cmd
 }
 
-func (s *NoteScreen) Retry() tea.Cmd {
+func (s *noteScreen) Retry() tea.Cmd {
 	s.busy = true
 	s.list.Title = "Loading notes"
 	return s.list.StartSpinner()
 }
 
-func (s *NoteScreen) start() tea.Cmd {
+func (s *noteScreen) start() tea.Cmd {
 	s.stopStream()
 	s.notes = nil
 	s.nextResult = nil
@@ -230,7 +230,7 @@ func (s *NoteScreen) start() tea.Cmd {
 	}
 }
 
-func (s *NoteScreen) loadWindow() tea.Cmd {
+func (s *noteScreen) loadWindow() tea.Cmd {
 	return func() tea.Msg {
 		results := make([]ankitts.NoteResult, 0, interactiveNoteWindowSize)
 		for range interactiveNoteWindowSize {
@@ -247,7 +247,7 @@ func (s *NoteScreen) loadWindow() tea.Cmd {
 	}
 }
 
-func (s *NoteScreen) refresh() tea.Cmd {
+func (s *noteScreen) refresh() tea.Cmd {
 	id := s.preferredNoteID
 	return func() tea.Msg {
 		for result := range s.source.Notes(
@@ -261,7 +261,7 @@ func (s *NoteScreen) refresh() tea.Cmd {
 	}
 }
 
-func (s *NoteScreen) selectPreferred() {
+func (s *noteScreen) selectPreferred() {
 	if s.preferredNoteID == 0 {
 		return
 	}
@@ -274,7 +274,7 @@ func (s *NoteScreen) selectPreferred() {
 	s.preferredNoteID = 0
 }
 
-func (s *NoteScreen) stopStream() {
+func (s *noteScreen) stopStream() {
 	if s.cancelStream != nil {
 		s.cancelStream()
 		s.cancelStream = nil
@@ -286,7 +286,7 @@ func (s *NoteScreen) stopStream() {
 	s.nextResult = nil
 }
 
-func noteListItems(notes []anki.Note, options NoteOptions) []list.Item {
+func noteListItems(notes []anki.Note, options noteOptions) []list.Item {
 	items := make([]list.Item, 0, len(notes))
 	for _, note := range notes {
 		title := firstFieldValue(note)

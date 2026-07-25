@@ -1,4 +1,4 @@
-package main
+package interactive
 
 import (
 	"fmt"
@@ -6,7 +6,6 @@ import (
 
 	"jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
 )
 
 type navigation uint8
@@ -17,9 +16,9 @@ const (
 )
 
 type interactiveWorkflow struct {
-	client   step.Client
-	app      application
-	options  runOptions
+	client   client
+	app      Application
+	options  Options
 	services []string
 	state    workflowState
 	screens  workflowScreens
@@ -33,11 +32,11 @@ type workflowState struct {
 }
 
 type workflowScreens struct {
-	note        *step.NoteScreen
-	source      *step.SourceFieldScreen
-	destination *step.DestinationFieldScreen
-	overwrite   *step.DestinationOverwriteScreen
-	service     *step.TTSServiceScreen
+	note        *noteScreen
+	source      *sourceFieldScreen
+	destination *destinationFieldScreen
+	overwrite   *destinationOverwriteScreen
+	service     *ttsServiceScreen
 }
 
 func (w *interactiveWorkflow) setNote(note anki.Note) {
@@ -92,8 +91,8 @@ func (w *interactiveWorkflow) resetAfterGeneration() {
 	w.clearAfterNote()
 }
 
-func (w *interactiveWorkflow) display() step.Display {
-	return step.Display{Context: w.state.contextLine()}
+func (w *interactiveWorkflow) display() display {
+	return display{Context: w.state.contextLine()}
 }
 
 func (s workflowState) contextLine() string {

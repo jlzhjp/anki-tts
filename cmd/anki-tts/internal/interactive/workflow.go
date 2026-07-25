@@ -1,4 +1,4 @@
-package main
+package interactive
 
 import (
 	"context"
@@ -8,14 +8,15 @@ import (
 	"strings"
 
 	"jlzhjp.dev/anki-tts"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
+	"jlzhjp.dev/anki-tts/cmd/anki-tts/internal/terminal"
 )
 
-func runInteractiveWorkflow(
+// Run executes the interactive note-at-a-time workflow.
+func Run(
 	ctx context.Context,
-	client step.Client,
-	app application,
-	options runOptions,
+	client terminal.Client,
+	app Application,
+	options Options,
 ) error {
 	services := app.ServiceNames()
 	if len(services) == 0 {
@@ -38,11 +39,11 @@ func (w *interactiveWorkflow) run(ctx context.Context) error {
 
 func (w *interactiveWorkflow) runNotes(ctx context.Context) (navigation, error) {
 	for {
-		note, screen, err := step.ChooseNote(
+		note, screen, err := chooseNote(
 			ctx,
 			w.client,
 			w.app,
-			step.NoteOptions{
+			noteOptions{
 				Query:            w.options.Query,
 				SourceField:      w.options.FromField,
 				DestinationField: w.options.ToField,
@@ -51,7 +52,7 @@ func (w *interactiveWorkflow) runNotes(ctx context.Context) (navigation, error) 
 			w.display(),
 		)
 		w.screens.note = screen
-		if errors.Is(err, step.ErrBack) {
+		if errors.Is(err, errBack) {
 			return navigateBack, nil
 		}
 		if err != nil {
@@ -76,7 +77,7 @@ func (w *interactiveWorkflow) runNote(ctx context.Context) (navigation, error) {
 	}
 
 	for {
-		field, screen, err := step.ChooseSourceField(
+		field, screen, err := chooseSourceField(
 			ctx,
 			w.client,
 			w.state.note,
@@ -84,7 +85,7 @@ func (w *interactiveWorkflow) runNote(ctx context.Context) (navigation, error) {
 			w.display(),
 		)
 		w.screens.source = screen
-		if errors.Is(err, step.ErrBack) {
+		if errors.Is(err, errBack) {
 			return navigateBack, nil
 		}
 		if err != nil {
@@ -110,7 +111,7 @@ func (w *interactiveWorkflow) withSource(ctx context.Context) (navigation, error
 	}
 
 	for {
-		field, screen, err := step.ChooseDestinationField(
+		field, screen, err := chooseDestinationField(
 			ctx,
 			w.client,
 			w.state.note,
@@ -118,7 +119,7 @@ func (w *interactiveWorkflow) withSource(ctx context.Context) (navigation, error
 			w.display(),
 		)
 		w.screens.destination = screen
-		if errors.Is(err, step.ErrBack) {
+		if errors.Is(err, errBack) {
 			return navigateBack, nil
 		}
 		if err != nil {
@@ -150,14 +151,14 @@ func (w *interactiveWorkflow) withDestination(ctx context.Context) (navigation, 
 
 	for {
 		if confirmOverwrite {
-			confirmed, screen, err := step.ConfirmDestinationOverwrite(
+			confirmed, screen, err := confirmDestinationOverwrite(
 				ctx,
 				w.client,
 				w.screens.overwrite,
 				w.display(),
 			)
 			w.screens.overwrite = screen
-			if errors.Is(err, step.ErrBack) {
+			if errors.Is(err, errBack) {
 				return navigateBack, nil
 			}
 			if err != nil {
@@ -187,7 +188,7 @@ func (w *interactiveWorkflow) chooseServiceAndGenerate(
 		return w.generate(ctx)
 	}
 
-	selected, screen, err := step.ChooseTTSService(
+	selected, screen, err := chooseTTSService(
 		ctx,
 		w.client,
 		w.services,
@@ -195,7 +196,7 @@ func (w *interactiveWorkflow) chooseServiceAndGenerate(
 		w.display(),
 	)
 	w.screens.service = screen
-	if errors.Is(err, step.ErrBack) {
+	if errors.Is(err, errBack) {
 		return navigateBack, nil
 	}
 	if err != nil {
@@ -213,7 +214,7 @@ func (w *interactiveWorkflow) generate(ctx context.Context) (navigation, error) 
 		DestinationField: w.state.destinationField,
 		Service:          w.state.service,
 	}
-	result, err := step.GenerateNoteAudio(
+	result, err := generateNoteAudio(
 		ctx,
 		w.client,
 		w.app,
@@ -224,7 +225,7 @@ func (w *interactiveWorkflow) generate(ctx context.Context) (navigation, error) 
 		return navigateBack, err
 	}
 
-	step.RefreshNoteList(
+	refreshNoteList(
 		w.screens.note,
 		saveStatus(result, w.state.destinationField),
 		w.state.note.ID,

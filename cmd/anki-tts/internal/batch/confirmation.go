@@ -1,4 +1,4 @@
-package step
+package batch
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// BatchConfirmationScreen displays the notes included in a batch operation.
-type BatchConfirmationScreen struct {
+// confirmationScreen displays the notes included in a batch operation.
+type confirmationScreen struct {
 	noteIDs   []int64
 	overwrite bool
 	height    int
@@ -18,18 +18,18 @@ type BatchConfirmationScreen struct {
 	offset    int
 }
 
-// ConfirmBatch presents or resumes a batch confirmation screen.
-func ConfirmBatch(
+// confirm presents or resumes a batch confirmation screen.
+func confirm(
 	ctx context.Context,
-	client Client,
+	client client,
 	noteIDs []int64,
 	overwrite bool,
-	previous *BatchConfirmationScreen,
-	display Display,
-) (bool, *BatchConfirmationScreen, error) {
+	previous *confirmationScreen,
+	display display,
+) (bool, *confirmationScreen, error) {
 	display.Resume = previous != nil
 	if previous == nil {
-		previous = &BatchConfirmationScreen{
+		previous = &confirmationScreen{
 			noteIDs:   append([]int64(nil), noteIDs...),
 			overwrite: overwrite,
 			height:    24,
@@ -39,9 +39,9 @@ func ConfirmBatch(
 	return value, previous, err
 }
 
-func (s *BatchConfirmationScreen) Init() tea.Cmd { return nil }
+func (s *confirmationScreen) Init() tea.Cmd { return nil }
 
-func (s *BatchConfirmationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+func (s *confirmationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "up", "k":
@@ -62,7 +62,7 @@ func (s *BatchConfirmationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return s, nil
 }
 
-func (s *BatchConfirmationScreen) View() tea.View {
+func (s *confirmationScreen) View() tea.View {
 	title := fmt.Sprintf("Generate audio for %d selected note(s)?", len(s.noteIDs))
 	if s.overwrite {
 		title = red(fmt.Sprintf(
@@ -88,7 +88,7 @@ func (s *BatchConfirmationScreen) View() tea.View {
 	return view
 }
 
-func (s *BatchConfirmationScreen) SetSize(_ int, height int) {
+func (s *confirmationScreen) SetSize(_ int, height int) {
 	s.height = height
 	if !s.sized {
 		s.sized = true
@@ -97,13 +97,13 @@ func (s *BatchConfirmationScreen) SetSize(_ int, height int) {
 	s.clampOffset()
 }
 
-func (*BatchConfirmationScreen) Filtering() bool { return false }
+func (*confirmationScreen) Filtering() bool { return false }
 
-func (s *BatchConfirmationScreen) rowCount() int {
+func (s *confirmationScreen) rowCount() int {
 	return len(s.noteIDs)
 }
 
-func (s *BatchConfirmationScreen) visibleRows(rows []string) []string {
+func (s *confirmationScreen) visibleRows(rows []string) []string {
 	if !s.altScreen || len(rows) <= s.visibleRowCount() {
 		return rows
 	}
@@ -111,15 +111,11 @@ func (s *BatchConfirmationScreen) visibleRows(rows []string) []string {
 	return rows[start:min(len(rows), start+s.visibleRowCount())]
 }
 
-func (s *BatchConfirmationScreen) visibleRowCount() int {
+func (s *confirmationScreen) visibleRowCount() int {
 	return max(1, s.height-5)
 }
 
-func (s *BatchConfirmationScreen) clampOffset() {
+func (s *confirmationScreen) clampOffset() {
 	limit := max(0, s.rowCount()-s.visibleRowCount())
 	s.offset = min(max(s.offset, 0), limit)
-}
-
-func red(value string) string {
-	return "\x1b[1;31m" + value + "\x1b[0m"
 }

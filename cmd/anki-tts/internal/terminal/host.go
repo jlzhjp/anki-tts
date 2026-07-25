@@ -1,4 +1,4 @@
-package main
+package terminal
 
 import (
 	"context"
@@ -7,8 +7,6 @@ import (
 	"io"
 
 	tea "charm.land/bubbletea/v2"
-
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
 )
 
 type screenOutcome struct {
@@ -17,28 +15,28 @@ type screenOutcome struct {
 }
 
 type screenRequest struct {
-	screen  step.Screen
+	screen  Screen
 	reply   chan screenOutcome
-	display step.Display
+	display Display
 }
 
 type screenRequestedMsg struct{ request screenRequest }
-type workflowFinishedMsg struct{ result workflowResult }
+type workflowFinishedMsg struct{ result Result }
 
-// workflowResult separates command failure from whether the active screen
+// Result separates command failure from whether the active screen
 // already explains that failure to the user.
-type workflowResult struct {
-	err            error
-	errorPresented bool
+type Result struct {
+	Err            error
+	ErrorPresented bool
 }
 
 type screenClient struct {
 	requests chan<- screenRequest
 }
 
-var _ step.Client = screenClient{}
+var _ Client = screenClient{}
 
-func (c screenClient) Prompt(ctx context.Context, screen step.Screen, display step.Display) (any, error) {
+func (c screenClient) Prompt(ctx context.Context, screen Screen, display Display) (any, error) {
 	reply := make(chan screenOutcome, 1)
 	select {
 	case c.requests <- screenRequest{screen: screen, reply: reply, display: display}:
@@ -49,7 +47,7 @@ func (c screenClient) Prompt(ctx context.Context, screen step.Screen, display st
 	select {
 	case outcome := <-reply:
 		if outcome.back {
-			return nil, step.ErrBack
+			return nil, ErrBack
 		}
 		return outcome.value, nil
 	case <-ctx.Done():
@@ -61,12 +59,12 @@ type screenHost struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	requests       <-chan screenRequest
-	done           <-chan workflowResult
+	done           <-chan Result
 	forceAltScreen bool
 
-	active              step.Screen
+	active              Screen
 	reply               chan screenOutcome
-	failure             *step.ErrorScreen
+	failure             *ErrorScreen
 	width               int
 	height              int
 	sized               bool
@@ -81,7 +79,7 @@ func newScreenHost(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	requests <-chan screenRequest,
-	done <-chan workflowResult,
+	done <-chan Result,
 	forceAltScreen bool,
 ) *screenHost {
 	return &screenHost{
@@ -121,35 +119,35 @@ func (m *screenHost) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case workflowFinishedMsg:
 		m.workflowDone = true
-		if msg.result.err != nil &&
-			!errors.Is(msg.result.err, context.Canceled) &&
-			!msg.result.errorPresented {
-			m.failure = step.NewErrorScreen(msg.result.err, nil)
+		if msg.result.Err != nil &&
+			!errors.Is(msg.result.Err, context.Canceled) &&
+			!msg.result.ErrorPresented {
+			m.failure = NewErrorScreen(msg.result.Err, nil)
 			m.resize()
 			return m, nil
 		}
 		return m, tea.Quit
 
-	case step.CompletedMsg:
+	case CompletedMsg:
 		return m.complete(screenOutcome{value: msg.Value})
 
-	case step.RetryMsg:
+	case RetryMsg:
 		m.failure = nil
 		var spinner tea.Cmd
-		if retryable, ok := m.active.(step.Retryable); ok {
+		if retryable, ok := m.active.(Retryable); ok {
 			spinner = retryable.Retry()
 		}
 		return m, tea.Batch(spinner, msg.Cmd)
 
-	case step.DismissErrorMsg:
+	case DismissErrorMsg:
 		m.failure = nil
 		if m.workflowDone || m.active == nil {
 			return m, tea.Quit
 		}
 		return m, nil
 
-	case step.FailedMsg:
-		m.failure = step.NewErrorScreen(msg.Err, msg.Retry)
+	case FailedMsg:
+		m.failure = NewErrorScreen(msg.Err, msg.Retry)
 		m.resize()
 		return m, nil
 
@@ -169,7 +167,7 @@ func (m *screenHost) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancel()
 				return m, tea.Quit
 			case "esc":
-				disabled, _ := active.(step.BackDisabled)
+				disabled, _ := active.(BackDisabled)
 				if m.failure == nil && (disabled == nil || !disabled.BackDisabled()) {
 					return m.complete(screenOutcome{back: true})
 				}
@@ -183,9 +181,9 @@ func (m *screenHost) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	updated, cmd := active.Update(message)
 	if m.failure != nil {
-		failure, ok := updated.(*step.ErrorScreen)
+		failure, ok := updated.(*ErrorScreen)
 		if !ok {
-			m.failure = step.NewErrorScreen(
+			m.failure = NewErrorScreen(
 				fmt.Errorf("error screen returned unexpected model %T", updated),
 				nil,
 			)
@@ -194,9 +192,9 @@ func (m *screenHost) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.failure = failure
 	} else {
-		screen, ok := updated.(step.Screen)
+		screen, ok := updated.(Screen)
 		if !ok {
-			m.failure = step.NewErrorScreen(
+			m.failure = NewErrorScreen(
 				fmt.Errorf("screen %T returned unexpected model %T", active, updated),
 				nil,
 			)
@@ -226,7 +224,7 @@ func (m *screenHost) View() tea.View {
 	return view
 }
 
-func (m *screenHost) current() step.Screen {
+func (m *screenHost) current() Screen {
 	if m.failure != nil {
 		return m.failure
 	}
@@ -257,7 +255,7 @@ func (m *screenHost) resize() {
 	if m.context != "" {
 		headerHeight++
 	}
-	if resizable, ok := active.(step.Resizable); ok {
+	if resizable, ok := active.(Resizable); ok {
 		resizable.SetSize(m.width, max(1, m.height-headerHeight))
 	}
 }
@@ -269,31 +267,31 @@ func waitForScreen(ctx context.Context, requests <-chan screenRequest) tea.Cmd {
 			return screenRequestedMsg{request: request}
 		case <-ctx.Done():
 			return workflowFinishedMsg{
-				result: workflowResult{err: ctx.Err()},
+				result: Result{Err: ctx.Err()},
 			}
 		}
 	}
 }
 
-func waitForWorkflow(ctx context.Context, done <-chan workflowResult) tea.Cmd {
+func waitForWorkflow(ctx context.Context, done <-chan Result) tea.Cmd {
 	return func() tea.Msg {
 		select {
 		case result := <-done:
 			return workflowFinishedMsg{result: result}
 		case <-ctx.Done():
 			return workflowFinishedMsg{
-				result: workflowResult{err: ctx.Err()},
+				result: Result{Err: ctx.Err()},
 			}
 		}
 	}
 }
 
-func runTerminal(
+func Run(
 	ctx context.Context,
 	input io.Reader,
 	output io.Writer,
 	forceAltScreen bool,
-	workflow func(context.Context, step.Client) workflowResult,
+	workflow func(context.Context, Client) Result,
 ) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -302,14 +300,14 @@ func runTerminal(
 	defer cancel()
 
 	requests := make(chan screenRequest)
-	hostDone := make(chan workflowResult, 1)
-	result := make(chan workflowResult, 1)
+	hostDone := make(chan Result, 1)
+	result := make(chan Result, 1)
 	host := newScreenHost(runCtx, cancel, requests, hostDone, forceAltScreen)
 	client := screenClient{requests: requests}
 	go func() {
-		workflowResult := workflow(runCtx, client)
-		hostDone <- workflowResult
-		result <- workflowResult
+		Result := workflow(runCtx, client)
+		hostDone <- Result
+		result <- Result
 	}()
 
 	_, programErr := tea.NewProgram(
@@ -328,8 +326,8 @@ func runTerminal(
 	}
 	if host.userCanceled &&
 		!host.cancelIsError &&
-		errors.Is(completed.err, context.Canceled) {
+		errors.Is(completed.Err, context.Canceled) {
 		return nil
 	}
-	return completed.err
+	return completed.Err
 }

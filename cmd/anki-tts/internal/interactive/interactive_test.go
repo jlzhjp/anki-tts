@@ -1,4 +1,4 @@
-package step
+package interactive
 
 import (
 	"context"
@@ -13,12 +13,12 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 	client := &fakeClient{value: "Audio"}
 	note := testNote()
 
-	value, screen, err := ChooseDestinationField(
+	value, screen, err := chooseDestinationField(
 		context.Background(),
 		client,
 		note,
 		nil,
-		Display{},
+		display{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -27,12 +27,12 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 		t.Fatalf("value=%q screen=%T display=%+v", value, screen, client.displays[0])
 	}
 
-	_, resumed, err := ChooseDestinationField(
+	_, resumed, err := chooseDestinationField(
 		context.Background(),
 		client,
 		note,
 		screen,
-		Display{},
+		display{},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -43,12 +43,12 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 }
 
 func TestChooseSourceFieldRejectsNoteWithoutText(t *testing.T) {
-	_, _, err := ChooseSourceField(
+	_, _, err := chooseSourceField(
 		context.Background(),
 		&fakeClient{},
 		anki.Note{Fields: map[string]anki.Field{"Front": {Value: " "}}},
 		nil,
-		Display{},
+		display{},
 	)
 	if err == nil || !strings.Contains(err.Error(), "no non-empty source fields") {
 		t.Fatalf("error=%v", err)
@@ -56,7 +56,7 @@ func TestChooseSourceFieldRejectsNoteWithoutText(t *testing.T) {
 }
 
 func TestChooseNoteMarksInvalidConfiguredFields(t *testing.T) {
-	items := noteListItems([]anki.Note{testNote()}, NoteOptions{
+	items := noteListItems([]anki.Note{testNote()}, noteOptions{
 		SourceField:      "Missing",
 		DestinationField: "AlsoMissing",
 	})
@@ -91,8 +91,8 @@ func TestPromptReportsUnexpectedResultType(t *testing.T) {
 	_, err := prompt[string](
 		context.Background(),
 		&fakeClient{value: true},
-		&DestinationOverwriteScreen{},
-		Display{},
+		&destinationOverwriteScreen{},
+		display{},
 	)
 	if err == nil || !strings.Contains(err.Error(), "screen returned bool") {
 		t.Fatalf("error=%v", err)
@@ -102,10 +102,10 @@ func TestPromptReportsUnexpectedResultType(t *testing.T) {
 type fakeClient struct {
 	value    any
 	err      error
-	displays []Display
+	displays []display
 }
 
-func (c *fakeClient) Prompt(_ context.Context, _ Screen, display Display) (any, error) {
+func (c *fakeClient) Prompt(_ context.Context, _ screen, display display) (any, error) {
 	c.displays = append(c.displays, display)
 	return c.value, c.err
 }

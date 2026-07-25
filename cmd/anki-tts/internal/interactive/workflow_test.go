@@ -1,4 +1,4 @@
-package main
+package interactive
 
 import (
 	"context"
@@ -9,32 +9,31 @@ import (
 
 	"jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
 )
 
 func TestInteractiveWorkflowSkipsConfiguredStagesAndLoopsNotes(t *testing.T) {
 	app := &workflowApplication{services: []string{"openrouter"}}
 	client := &scriptedClient{}
-	client.prompt = func(screen step.Screen, _ step.Display) (any, error) {
+	client.prompt = func(screen screen, _ display) (any, error) {
 		client.screens = append(client.screens, screen)
 		switch screen.(type) {
-		case *step.NoteScreen:
+		case *noteScreen:
 			if len(client.screens) == 1 {
 				return workflowTestNote(), nil
 			}
 			return nil, context.Canceled
-		case *step.NoteAudioGenerationScreen:
+		case *noteAudioGenerationScreen:
 			return ankitts.GenerateResult{Filename: "voice.mp3"}, nil
 		default:
 			return nil, fmt.Errorf("unexpected screen %T", screen)
 		}
 	}
 
-	err := runInteractiveWorkflow(
+	err := Run(
 		context.Background(),
 		client,
 		app,
-		runOptions{
+		Options{
 			FromField: "Front",
 			ToField:   "Audio",
 			Service:   "openrouter",
@@ -56,39 +55,39 @@ func TestInteractiveWorkflowBackUnwindsVisibleStages(t *testing.T) {
 	app := &workflowApplication{services: []string{"openrouter"}}
 	client := &scriptedClient{}
 	var sequence []string
-	client.prompt = func(screen step.Screen, _ step.Display) (any, error) {
+	client.prompt = func(screen screen, _ display) (any, error) {
 		switch screen.(type) {
-		case *step.NoteScreen:
+		case *noteScreen:
 			sequence = append(sequence, "note")
 			if len(sequence) == 1 {
 				return workflowTestNote(), nil
 			}
 			return nil, context.Canceled
-		case *step.SourceFieldScreen:
+		case *sourceFieldScreen:
 			sequence = append(sequence, "source")
 			if len(sequence) == 2 {
 				return "Front", nil
 			}
-			return nil, step.ErrBack
-		case *step.DestinationFieldScreen:
+			return nil, errBack
+		case *destinationFieldScreen:
 			sequence = append(sequence, "destination")
 			if len(sequence) == 3 {
 				return "Audio", nil
 			}
-			return nil, step.ErrBack
-		case *step.TTSServiceScreen:
+			return nil, errBack
+		case *ttsServiceScreen:
 			sequence = append(sequence, "service")
-			return nil, step.ErrBack
+			return nil, errBack
 		default:
 			return nil, fmt.Errorf("unexpected screen %T", screen)
 		}
 	}
 
-	err := runInteractiveWorkflow(
+	err := Run(
 		context.Background(),
 		client,
 		app,
-		runOptions{
+		Options{
 			Yes: true,
 		},
 	)
@@ -113,33 +112,33 @@ func TestInteractiveWorkflowBackSkipsConfiguredStages(t *testing.T) {
 	app := &workflowApplication{services: []string{"openrouter"}}
 	client := &scriptedClient{}
 	var sequence []string
-	client.prompt = func(screen step.Screen, _ step.Display) (any, error) {
+	client.prompt = func(screen screen, _ display) (any, error) {
 		switch screen.(type) {
-		case *step.NoteScreen:
+		case *noteScreen:
 			sequence = append(sequence, "note")
 			if len(sequence) == 1 {
 				return workflowTestNote(), nil
 			}
 			return nil, context.Canceled
-		case *step.SourceFieldScreen:
+		case *sourceFieldScreen:
 			sequence = append(sequence, "source")
 			if len(sequence) == 2 {
 				return "Front", nil
 			}
-			return nil, step.ErrBack
-		case *step.TTSServiceScreen:
+			return nil, errBack
+		case *ttsServiceScreen:
 			sequence = append(sequence, "service")
-			return nil, step.ErrBack
+			return nil, errBack
 		default:
 			return nil, fmt.Errorf("unexpected screen %T", screen)
 		}
 	}
 
-	err := runInteractiveWorkflow(
+	err := Run(
 		context.Background(),
 		client,
 		app,
-		runOptions{
+		Options{
 			ToField: "Audio",
 			Yes:     true,
 		},
@@ -158,26 +157,26 @@ func TestInteractiveWorkflowUsesIterativeNoteCycle(t *testing.T) {
 	app := &workflowApplication{services: []string{"openrouter"}}
 	client := &scriptedClient{}
 	notes := 0
-	client.prompt = func(screen step.Screen, _ step.Display) (any, error) {
+	client.prompt = func(screen screen, _ display) (any, error) {
 		switch screen.(type) {
-		case *step.NoteScreen:
+		case *noteScreen:
 			if notes == cycles {
 				return nil, context.Canceled
 			}
 			notes++
 			return workflowTestNote(), nil
-		case *step.NoteAudioGenerationScreen:
+		case *noteAudioGenerationScreen:
 			return ankitts.GenerateResult{Filename: "voice.mp3"}, nil
 		default:
 			return nil, fmt.Errorf("unexpected screen %T", screen)
 		}
 	}
 
-	err := runInteractiveWorkflow(
+	err := Run(
 		context.Background(),
 		client,
 		app,
-		runOptions{
+		Options{
 			FromField: "Front",
 			ToField:   "Audio",
 			Service:   "openrouter",
@@ -193,11 +192,11 @@ func TestInteractiveWorkflowUsesIterativeNoteCycle(t *testing.T) {
 }
 
 func TestInteractiveWorkflowRejectsConfiguredUnknownService(t *testing.T) {
-	err := runInteractiveWorkflow(
+	err := Run(
 		context.Background(),
 		&scriptedClient{},
 		&workflowApplication{services: []string{"openrouter"}},
-		runOptions{Service: "missing"},
+		Options{Service: "missing"},
 	)
 	if err == nil {
 		t.Fatal("expected an unknown-service error")
@@ -205,14 +204,14 @@ func TestInteractiveWorkflowRejectsConfiguredUnknownService(t *testing.T) {
 }
 
 type scriptedClient struct {
-	prompt  func(step.Screen, step.Display) (any, error)
-	screens []step.Screen
+	prompt  func(screen, display) (any, error)
+	screens []screen
 }
 
 func (c *scriptedClient) Prompt(
 	_ context.Context,
-	screen step.Screen,
-	display step.Display,
+	screen screen,
+	display display,
 ) (any, error) {
 	return c.prompt(screen, display)
 }

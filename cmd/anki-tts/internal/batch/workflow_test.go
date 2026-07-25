@@ -1,4 +1,4 @@
-package main
+package batch
 
 import (
 	"context"
@@ -8,32 +8,31 @@ import (
 
 	"jlzhjp.dev/anki-tts"
 	"jlzhjp.dev/anki-tts/anki"
-	"jlzhjp.dev/anki-tts/cmd/anki-tts/step"
 	"jlzhjp.dev/anki-tts/pipeline"
 )
 
 func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
-	app, ankiClient, selection := preparedBatchWorkflow(t, true)
+	app, ankiClient, selection := preparedWorkflow(t, true)
 	failure := errors.New("generation failed")
 	client := &scriptedClient{}
 	var sequence []string
-	var generationDisplay step.Display
-	client.prompt = func(screen step.Screen, display step.Display) (any, error) {
+	var generationdisplay display
+	client.prompt = func(screen screen, display display) (any, error) {
 		switch screen := screen.(type) {
-		case *step.BatchConfirmationScreen:
+		case *confirmationScreen:
 			if len(sequence) == 0 && ankiClient.notesInfoCount() != 0 {
 				t.Fatal("note details loaded before initial confirmation")
 			}
 			sequence = append(sequence, "confirmation")
 			return true, nil
-		case *batchPreparationScreen:
+		case *preparationScreen:
 			sequence = append(sequence, "preparation")
 			return screen.prepare()
-		case *step.BatchGenerationScreen:
+		case *generationScreen:
 			sequence = append(sequence, "generation")
-			generationDisplay = display
-			return step.BatchOutcome{
-				Result: ankitts.BatchResult{
+			generationdisplay = display
+			return outcome{
+				result: ankitts.BatchResult{
 					Items: []ankitts.ItemResult{
 						{NoteID: 42, Err: failure},
 					},
@@ -44,11 +43,11 @@ func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
 		}
 	}
 
-	result := runBatchWorkflow(
+	result := Run(
 		context.Background(),
 		client,
 		app,
-		runOptions{FromField: "Front", ToField: "Audio", Service: "Test"},
+		Options{FromField: "Front", ToField: "Audio", Service: "Test"},
 		selection,
 	)
 
@@ -56,68 +55,68 @@ func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
 	if fmt.Sprint(sequence) != fmt.Sprint(want) {
 		t.Fatalf("sequence=%v, want %v", sequence, want)
 	}
-	if !generationDisplay.CancelIsError {
+	if !generationdisplay.CancelIsError {
 		t.Fatal("batch execution cancellation was not marked as an error")
 	}
-	if !result.errorPresented || !errors.Is(result.err, failure) {
+	if !result.ErrorPresented || !errors.Is(result.Err, failure) {
 		t.Fatalf("result=%+v", result)
 	}
 }
 
 func TestBatchWorkflowYesSkipsConfirmations(t *testing.T) {
-	app, _, selection := preparedBatchWorkflow(t, true)
+	app, _, selection := preparedWorkflow(t, true)
 	client := &scriptedClient{}
-	client.prompt = func(screen step.Screen, display step.Display) (any, error) {
-		if preparation, ok := screen.(*batchPreparationScreen); ok {
+	client.prompt = func(screen screen, display display) (any, error) {
+		if preparation, ok := screen.(*preparationScreen); ok {
 			return preparation.prepare()
 		}
-		if _, ok := screen.(*step.BatchGenerationScreen); !ok {
+		if _, ok := screen.(*generationScreen); !ok {
 			return nil, fmt.Errorf("unexpected screen %T", screen)
 		}
-		return step.BatchOutcome{
-			Result: ankitts.BatchResult{
+		return outcome{
+			result: ankitts.BatchResult{
 				Items: []ankitts.ItemResult{{NoteID: 42}},
 			},
 		}, nil
 	}
 
-	result := runBatchWorkflow(
+	result := Run(
 		context.Background(),
 		client,
 		app,
-		runOptions{FromField: "Front", ToField: "Audio", Service: "Test", Yes: true},
+		Options{FromField: "Front", ToField: "Audio", Service: "Test", Yes: true},
 		selection,
 	)
 
-	if result.err != nil || result.errorPresented {
+	if result.Err != nil || result.ErrorPresented {
 		t.Fatalf("result=%+v", result)
 	}
 }
 
 func TestBatchWorkflowRejectionSkipsNoteDetails(t *testing.T) {
-	app, ankiClient, selection := preparedBatchWorkflow(t, false)
-	client := &scriptedClient{prompt: func(screen step.Screen, _ step.Display) (any, error) {
-		if _, ok := screen.(*step.BatchConfirmationScreen); !ok {
+	app, ankiClient, selection := preparedWorkflow(t, false)
+	client := &scriptedClient{prompt: func(screen screen, _ display) (any, error) {
+		if _, ok := screen.(*confirmationScreen); !ok {
 			return nil, fmt.Errorf("unexpected screen %T", screen)
 		}
 		return false, nil
 	}}
-	result := runBatchWorkflow(
+	result := Run(
 		context.Background(),
 		client,
 		app,
-		runOptions{FromField: "Front", ToField: "Audio", Service: "Test"},
+		Options{FromField: "Front", ToField: "Audio", Service: "Test"},
 		selection,
 	)
-	if result.err != nil || ankiClient.notesInfoCount() != 0 {
+	if result.Err != nil || ankiClient.notesInfoCount() != 0 {
 		t.Fatalf("result=%+v notesInfoCalls=%d", result, ankiClient.notesInfoCount())
 	}
 }
 
-func preparedBatchWorkflow(
+func preparedWorkflow(
 	t *testing.T,
 	overwrite bool,
-) (*ankitts.Application, *batchAnki, ankitts.NoteSelection) {
+) (*ankitts.Application, *fakeAnkiClient, ankitts.NoteSelection) {
 	t.Helper()
 	destination := ""
 	if overwrite {
@@ -134,10 +133,10 @@ func preparedBatchWorkflow(
 		},
 	}
 	services := ankitts.NewServiceContainer()
-	if err := services.Add("Test", batchTTS{}); err != nil {
+	if err := services.Add("Test", fakeTTS{}); err != nil {
 		t.Fatal(err)
 	}
-	ankiClient := &batchAnki{notes: notes}
+	ankiClient := &fakeAnkiClient{notes: notes}
 	app, err := ankitts.New(
 		ankiClient,
 		services,

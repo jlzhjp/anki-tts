@@ -1,4 +1,4 @@
-package step
+package interactive
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 )
 
 func TestNoteScreenLoadsOneConsumerWindowAtATime(t *testing.T) {
-	source := &windowNoteSource{notes: testWindowNotes(120)}
+	source := &windownoteSource{notes: testWindowNotes(120)}
 	screen := newNoteScreen(
 		context.Background(),
 		source,
-		NoteOptions{Query: ankitts.NoteQuery{Filter: "tag:tts"}},
+		noteOptions{Query: ankitts.NoteQuery{Filter: "tag:tts"}},
 	)
 
 	started := screen.start()().(noteStreamStartedMsg)
@@ -48,13 +48,13 @@ func TestNoteScreenLoadsOneConsumerWindowAtATime(t *testing.T) {
 }
 
 func TestNoteScreenRefreshesOnlySelectedNote(t *testing.T) {
-	source := &windowNoteSource{notes: []anki.Note{{
+	source := &windownoteSource{notes: []anki.Note{{
 		ID: 1,
 		Fields: map[string]anki.Field{
 			"Front": {Value: "before"},
 		},
 	}}}
-	screen := newNoteScreen(context.Background(), source, NoteOptions{})
+	screen := newNoteScreen(context.Background(), source, noteOptions{})
 	screen.notes = append([]anki.Note(nil), source.notes...)
 	source.notes[0] = anki.Note{
 		ID: 1,
@@ -62,7 +62,7 @@ func TestNoteScreenRefreshesOnlySelectedNote(t *testing.T) {
 			"Front": {Value: "after"},
 		},
 	}
-	RefreshNoteList(screen, "saved", 1)
+	refreshNoteList(screen, "saved", 1)
 
 	message := screen.refresh()().(noteRefreshedMsg)
 	_, _ = screen.Update(message)
@@ -74,7 +74,7 @@ func TestNoteScreenRefreshesOnlySelectedNote(t *testing.T) {
 	}
 }
 
-type windowNoteSource struct {
+type windownoteSource struct {
 	notes         []anki.Note
 	filter        string
 	batchSize     int
@@ -82,7 +82,7 @@ type windowNoteSource struct {
 	lastSelection ankitts.NoteSelection
 }
 
-func (s *windowNoteSource) SearchNotes(
+func (s *windownoteSource) SearchNotes(
 	_ context.Context,
 	query ankitts.NoteQuery,
 ) (ankitts.NoteSelection, error) {
@@ -94,7 +94,7 @@ func (s *windowNoteSource) SearchNotes(
 	return ankitts.NoteSelection{IDs: ids}, nil
 }
 
-func (s *windowNoteSource) Notes(
+func (s *windownoteSource) Notes(
 	_ context.Context,
 	selection ankitts.NoteSelection,
 	options ankitts.NoteLoadOptions,

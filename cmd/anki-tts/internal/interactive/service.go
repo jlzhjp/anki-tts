@@ -1,4 +1,4 @@
-package step
+package interactive
 
 import (
 	"context"
@@ -7,23 +7,23 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// TTSServiceScreen displays configured text-to-speech services.
-type TTSServiceScreen struct{ selectionScreen }
+// ttsServiceScreen displays configured text-to-speech services.
+type ttsServiceScreen struct{ selectionScreen }
 
-func newTTSServiceScreen(services []string) *TTSServiceScreen {
-	return &TTSServiceScreen{
+func newTTSServiceScreen(services []string) *ttsServiceScreen {
+	return &ttsServiceScreen{
 		selectionScreen: newSelectionScreen("Select a TTS service", serviceListItems(services)),
 	}
 }
 
-// ChooseTTSService presents or resumes text-to-speech service selection.
-func ChooseTTSService(
+// chooseTTSService presents or resumes text-to-speech service selection.
+func chooseTTSService(
 	ctx context.Context,
-	client Client,
+	client client,
 	services []string,
-	previous *TTSServiceScreen,
-	display Display,
-) (string, *TTSServiceScreen, error) {
+	previous *ttsServiceScreen,
+	display display,
+) (string, *ttsServiceScreen, error) {
 	display.Resume = previous != nil
 	if previous == nil {
 		previous = newTTSServiceScreen(services)
@@ -32,9 +32,9 @@ func ChooseTTSService(
 	return value, previous, err
 }
 
-func (s *TTSServiceScreen) Init() tea.Cmd { return nil }
+func (s *ttsServiceScreen) Init() tea.Cmd { return nil }
 
-func (s *TTSServiceScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+func (s *ttsServiceScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := message.(tea.KeyPressMsg); ok && key.String() == "enter" && !s.busy && !s.Filtering() {
 		if selected, ok := s.selected(); ok {
 			return s, complete(selected.value.(string))

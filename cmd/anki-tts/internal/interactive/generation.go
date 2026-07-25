@@ -1,4 +1,4 @@
-package step
+package interactive
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"jlzhjp.dev/anki-tts"
 )
 
-type GenerationApplication interface {
+type generationApplication interface {
 	HasAudioProcessors() bool
 	Prepare(ankitts.GenerationRequest) (ankitts.Plan, error)
 	Execute(context.Context, ankitts.Plan, ankitts.ExecuteOptions) (ankitts.BatchResult, error)
@@ -20,24 +20,24 @@ type generationFinishedMsg struct {
 	err    error
 }
 
-// NoteAudioGenerationScreen displays progress while generating one note's audio.
-type NoteAudioGenerationScreen struct {
+// noteAudioGenerationScreen displays progress while generating one note's audio.
+type noteAudioGenerationScreen struct {
 	selectionScreen
 	ctx     context.Context
-	app     GenerationApplication
+	app     generationApplication
 	request ankitts.GenerationRequest
 }
 
 func newNoteAudioGenerationScreen(
 	ctx context.Context,
-	app GenerationApplication,
+	app generationApplication,
 	request ankitts.GenerationRequest,
-) *NoteAudioGenerationScreen {
+) *noteAudioGenerationScreen {
 	title := "Generating voice with " + request.Service
 	if app.HasAudioProcessors() {
 		title = "Generating and transforming audio with " + request.Service
 	}
-	screen := &NoteAudioGenerationScreen{
+	screen := &noteAudioGenerationScreen{
 		selectionScreen: newSelectionScreen(title, nil),
 		ctx:             ctx,
 		app:             app,
@@ -47,23 +47,23 @@ func newNoteAudioGenerationScreen(
 	return screen
 }
 
-// GenerateNoteAudio runs generation while presenting retryable progress.
-func GenerateNoteAudio(
+// generateNoteAudio runs generation while presenting retryable progress.
+func generateNoteAudio(
 	ctx context.Context,
-	client Client,
-	app GenerationApplication,
+	client client,
+	app generationApplication,
 	request ankitts.GenerationRequest,
-	display Display,
+	display display,
 ) (ankitts.GenerateResult, error) {
 	screen := newNoteAudioGenerationScreen(ctx, app, request)
 	return prompt[ankitts.GenerateResult](ctx, client, screen, display)
 }
 
-func (s *NoteAudioGenerationScreen) Init() tea.Cmd {
+func (s *noteAudioGenerationScreen) Init() tea.Cmd {
 	return tea.Batch(s.list.StartSpinner(), s.generate())
 }
 
-func (s *NoteAudioGenerationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+func (s *noteAudioGenerationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if msg, ok := message.(generationFinishedMsg); ok {
 		s.list.StopSpinner()
 		if msg.err != nil {
@@ -74,14 +74,14 @@ func (s *NoteAudioGenerationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd)
 	return s, s.update(message)
 }
 
-func (s *NoteAudioGenerationScreen) BackDisabled() bool { return true }
+func (s *noteAudioGenerationScreen) BackDisabled() bool { return true }
 
-func (s *NoteAudioGenerationScreen) Retry() tea.Cmd {
+func (s *noteAudioGenerationScreen) Retry() tea.Cmd {
 	s.busy = true
 	return s.list.StartSpinner()
 }
 
-func (s *NoteAudioGenerationScreen) generate() tea.Cmd {
+func (s *noteAudioGenerationScreen) generate() tea.Cmd {
 	return func() tea.Msg {
 		plan, err := s.app.Prepare(s.request)
 		if err != nil {
