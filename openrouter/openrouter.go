@@ -35,9 +35,9 @@ type HTTPClient interface {
 
 // Factory creates OpenRouter text-to-speech services.
 type Factory struct {
+	httpClient     HTTPClient
 	endpoint       string
 	modelsEndpoint string
-	httpClient     HTTPClient
 }
 
 // Config describes an OpenRouter text-to-speech service.
@@ -140,13 +140,13 @@ func (f *Factory) Create(config Config) (ankitts.Service, error) {
 }
 
 type service struct {
+	httpClient     HTTPClient
+	costCalculator costCalculator
 	endpoint       string
 	apiKey         string
 	model          string
 	voice          string
 	format         string
-	httpClient     HTTPClient
-	costCalculator costCalculator
 }
 
 type speechRequest struct {
@@ -210,12 +210,12 @@ func (s *service) Generate(ctx context.Context, input ankitts.Input) (ankitts.Vo
 
 type voiceResult struct {
 	body           io.Closer
+	costCalculator costCalculator
 	stream         *streamutil.LimitedReader
 	mediaType      string
 	format         string
 	sentence       string
 	model          string
-	costCalculator costCalculator
 }
 
 func (v *voiceResult) Read(p []byte) (int, error) {

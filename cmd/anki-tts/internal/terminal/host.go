@@ -58,19 +58,18 @@ func (c screenClient) Prompt(ctx context.Context, screen Screen, display Display
 }
 
 type screenHost struct {
-	ctx            context.Context
-	cancel         context.CancelFunc
-	requests       <-chan screenRequest
-	done           <-chan Result
-	forceAltScreen bool
-
+	ctx                 context.Context
 	active              Screen
+	cancel              context.CancelFunc
+	requests            <-chan screenRequest
+	done                <-chan Result
 	reply               chan screenOutcome
 	failure             *ErrorScreen
+	context             string
 	width               int
 	height              int
+	forceAltScreen      bool
 	sized               bool
-	context             string
 	workflowDone        bool
 	userCanceled        bool
 	cancelIsError       bool

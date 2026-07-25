@@ -7,6 +7,7 @@ import (
 )
 
 func TestFromSliceStopsAfterCancellation(t *testing.T) {
+	t.Parallel()
 	values := make([]int, 100_000)
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -26,14 +27,14 @@ func TestFromSliceStopsAfterCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct {
-		results []Result[int]
 		err     error
+		results []Result[int]
 	}, 1)
 	go func() {
 		results, err := Collect(ctx, stream, nil)
 		done <- struct {
-			results []Result[int]
 			err     error
+			results []Result[int]
 		}{results: results, err: err}
 	}()
 

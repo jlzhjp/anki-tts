@@ -18,11 +18,11 @@ type costCalculator interface {
 }
 
 type openRouterCostCalculator struct {
+	httpClient    HTTPClient
+	pricesByModel map[string]float64
 	endpoint      string
 	apiKey        string
-	httpClient    HTTPClient
 	mu            sync.Mutex
-	pricesByModel map[string]float64
 }
 
 func newOpenRouterCostCalculator(endpoint, apiKey string, httpClient HTTPClient) costCalculator {
@@ -56,7 +56,7 @@ func (c *openRouterCostCalculator) loadPricePerCharacter(ctx context.Context, mo
 	query := endpoint.Query()
 	query.Set("output_modalities", "speech")
 	endpoint.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), http.NoBody)
 	if err != nil {
 		return 0, fmt.Errorf("load OpenRouter TTS pricing: create request: %w", err)
 	}

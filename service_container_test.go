@@ -9,6 +9,7 @@ import (
 )
 
 func TestServiceContainer(t *testing.T) {
+	t.Parallel()
 	container := NewServiceContainer()
 	service := containerFakeService{}
 	if err := container.Add("Zulu", service); err != nil {

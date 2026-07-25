@@ -38,9 +38,9 @@ func (c *fakeClient) Prompt(
 }
 
 type fakeAnkiClient struct {
-	mu             sync.Mutex
 	notes          []anki.Note
 	notesInfoCalls int
+	mu             sync.Mutex
 }
 
 func (b *fakeAnkiClient) FindNoteIDs(context.Context, string) ([]int64, error) {

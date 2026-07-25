@@ -11,10 +11,10 @@ type Stream[T any] struct {
 }
 
 type entry[T any] struct {
-	index   int
 	value   T
-	stage   string
 	failure error
+	stage   string
+	index   int
 }
 
 type execution struct {

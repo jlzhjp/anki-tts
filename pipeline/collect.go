@@ -7,10 +7,10 @@ import (
 
 // Result is the terminal state of one input item.
 type Result[T any] struct {
-	Index int
 	Value T
-	Stage string
 	Err   error
+	Stage string
+	Index int
 }
 
 // Collect executes a stream and returns input-ordered item outcomes. A canceled

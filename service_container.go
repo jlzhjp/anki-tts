@@ -11,8 +11,8 @@ import (
 
 // ServiceContainer stores the text-to-speech services available to the application.
 type ServiceContainer struct {
-	mu       sync.RWMutex
 	services map[string]Service
+	mu       sync.RWMutex
 }
 
 // NewServiceContainer creates an empty service container.

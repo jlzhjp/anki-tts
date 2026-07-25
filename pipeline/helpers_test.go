@@ -6,8 +6,8 @@ import (
 )
 
 type testItem struct {
-	id     int
 	stages []string
+	id     int
 }
 
 func appendStage(name string) Transform[testItem, testItem] {

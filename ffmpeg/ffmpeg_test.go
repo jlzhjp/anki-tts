@@ -11,6 +11,7 @@ import (
 )
 
 func TestTransformStreamsAudio(t *testing.T) {
+	t.Parallel()
 	runner := &fakeRunner{output: []byte("transformed")}
 	transformer, err := NewWithRunner(Config{
 		Format: "MP3",
@@ -62,6 +63,7 @@ func TestTransformStreamsAudio(t *testing.T) {
 }
 
 func TestTransformSeparatesMuxerFromExtension(t *testing.T) {
+	t.Parallel()
 	runner := &fakeRunner{output: []byte("transformed")}
 	transformer, err := NewWithRunner(Config{Format: FormatAAC}, runner, 1024)
 	if err != nil {
@@ -83,15 +85,16 @@ func TestTransformSeparatesMuxerFromExtension(t *testing.T) {
 }
 
 func TestTransformErrors(t *testing.T) {
+	t.Parallel()
 	runErr := errors.New("exit status 1")
 	spawnErr := errors.New("fork/exec ffmpeg: resource unavailable")
 	tests := []struct {
-		name       string
+		wantIs     error
 		runner     *fakeRunner
+		name       string
+		want       string
 		limit      int64
 		cancel     bool
-		want       string
-		wantIs     error
 		startFail  bool
 		wantKilled bool
 	}{
@@ -103,6 +106,7 @@ func TestTransformErrors(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			transformer, err := NewWithRunner(Config{Format: "mp3"}, test.runner, test.limit)
 			if err != nil {
 				t.Fatal(err)
@@ -138,6 +142,7 @@ func TestTransformErrors(t *testing.T) {
 }
 
 func TestOutputStreamCloseTerminatesOnce(t *testing.T) {
+	t.Parallel()
 	runner := &fakeRunner{output: []byte("unread")}
 	transformer, err := NewWithRunner(Config{Format: "mp3"}, runner, 10)
 	if err != nil {
@@ -159,13 +164,14 @@ func TestOutputStreamCloseTerminatesOnce(t *testing.T) {
 }
 
 func TestOutputStreamResultError(t *testing.T) {
+	t.Parallel()
 	streamErr := errors.New("stream failed")
 	waitErr := errors.New("exit status 1")
 	tests := []struct {
-		name   string
-		result outputStreamResult
-		want   string
 		is     error
+		name   string
+		want   string
+		result outputStreamResult
 	}{
 		{name: "success", result: outputStreamResult{bytesRead: 1}},
 		{name: "limit takes precedence", result: outputStreamResult{outputErr: errOutputTooLarge, contextErr: context.Canceled, processErr: waitErr, maxBytes: 4}, want: "exceeds configured size limit (4 bytes)", is: errOutputTooLarge},
@@ -177,6 +183,7 @@ func TestOutputStreamResultError(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			err := test.result.resultError()
 			if test.want == "" {
 				if err != nil {
@@ -195,6 +202,7 @@ func TestOutputStreamResultError(t *testing.T) {
 }
 
 func TestTransformBoundsStderr(t *testing.T) {
+	t.Parallel()
 	runner := &fakeRunner{waitErr: errors.New("failed"), stderr: strings.Repeat("x", maxStderrSize+10)}
 	transformer, err := NewWithRunner(Config{Format: "mp3"}, runner, 1024)
 	if err != nil {
@@ -211,11 +219,12 @@ func TestTransformBoundsStderr(t *testing.T) {
 }
 
 func TestConfigurationValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name   string
-		config Config
 		runner CommandRunner
+		name   string
 		want   string
+		config Config
 	}{
 		{name: "missing format", config: Config{}, runner: &fakeRunner{}, want: "format must be"},
 		{name: "empty format", config: Config{Format: "  "}, runner: &fakeRunner{}, want: "format must be"},
@@ -225,6 +234,7 @@ func TestConfigurationValidation(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := NewWithRunner(test.config, test.runner, 1024)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want containing %q", err, test.want)

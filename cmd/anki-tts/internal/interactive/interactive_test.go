@@ -10,6 +10,7 @@ import (
 )
 
 func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
+	t.Parallel()
 	client := &fakeClient{value: "Audio"}
 	note := testNote()
 
@@ -43,6 +44,7 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 }
 
 func TestChooseSourceFieldRejectsNoteWithoutText(t *testing.T) {
+	t.Parallel()
 	_, _, err := chooseSourceField(
 		t.Context(),
 		&fakeClient{},
@@ -56,6 +58,7 @@ func TestChooseSourceFieldRejectsNoteWithoutText(t *testing.T) {
 }
 
 func TestChooseNoteMarksInvalidConfiguredFields(t *testing.T) {
+	t.Parallel()
 	items := noteListItems([]anki.Note{testNote()}, noteOptions{
 		SourceField:      "Missing",
 		DestinationField: "AlsoMissing",
@@ -74,6 +77,7 @@ func TestChooseNoteMarksInvalidConfiguredFields(t *testing.T) {
 }
 
 func TestGenerateNoteAudioRunsApplication(t *testing.T) {
+	t.Parallel()
 	app := &fakeGenerationApplication{
 		result: ankitts.GenerateResult{Filename: "voice.mp3"},
 	}
@@ -104,6 +108,7 @@ func requireMessage[T any](t *testing.T, message any) T {
 }
 
 func TestPromptReportsUnexpectedResultType(t *testing.T) {
+	t.Parallel()
 	_, err := prompt[string](
 		t.Context(),
 		&fakeClient{value: true},
@@ -127,9 +132,9 @@ func (c *fakeClient) Prompt(_ context.Context, _ screen, display display) (any, 
 }
 
 type fakeGenerationApplication struct {
-	request ankitts.GenerationRequest
 	result  ankitts.GenerateResult
 	err     error
+	request ankitts.GenerationRequest
 }
 
 func (a *fakeGenerationApplication) HasAudioProcessors() bool { return false }

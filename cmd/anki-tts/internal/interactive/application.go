@@ -12,9 +12,9 @@ type Application interface {
 
 // Options configures stages that can be supplied without prompting.
 type Options struct {
-	Query     ankitts.NoteQuery
 	FromField string
 	ToField   string
 	Service   string
+	Query     ankitts.NoteQuery
 	Yes       bool
 }

@@ -44,10 +44,10 @@ type CommandRunner interface {
 
 // Transformer transforms audio streams with FFmpeg.
 type Transformer struct {
+	runner        CommandRunner
 	path          string
 	format        Format
 	args          []string
-	runner        CommandRunner
 	maxOutputSize int64
 }
 

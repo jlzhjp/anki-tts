@@ -12,6 +12,7 @@ import (
 )
 
 func TestBatchConfirmationChoosesAlternateScreenFromHeight(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		count  int
@@ -22,6 +23,7 @@ func TestBatchConfirmationChoosesAlternateScreenFromHeight(t *testing.T) {
 		{name: "needs alternate screen", count: 20, height: 10, want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			screen := &confirmationScreen{
 				noteIDs: noteIDs(test.count),
 				height:  24,
@@ -43,6 +45,7 @@ func TestBatchConfirmationChoosesAlternateScreenFromHeight(t *testing.T) {
 }
 
 func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
+	t.Parallel()
 	screen := &generationScreen{
 		notes:    plannedNotes(1, false),
 		progress: make(map[int]noteProgress),
@@ -101,6 +104,7 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 }
 
 func TestBatchConfirmationAcceptsAndRejects(t *testing.T) {
+	t.Parallel()
 	screen := &confirmationScreen{}
 	_, accept := screen.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
 	if msg, ok := accept().(completedMsg); !ok || msg.Value != true {
@@ -113,6 +117,7 @@ func TestBatchConfirmationAcceptsAndRejects(t *testing.T) {
 }
 
 func TestBatchStepFunctionsConstructTypedScreens(t *testing.T) {
+	t.Parallel()
 	confirmationClient := &fakeClient{value: true}
 	accepted, confirmation, err := confirm(
 		t.Context(),
@@ -148,6 +153,7 @@ func TestBatchStepFunctionsConstructTypedScreens(t *testing.T) {
 }
 
 func TestBatchGenerationExecutesWithProgressReporter(t *testing.T) {
+	t.Parallel()
 	app := &fakeBatchExecution{
 		result: ankitts.BatchResult{
 			Items: []ankitts.ItemResult{{NoteID: 1}},
@@ -179,8 +185,8 @@ func TestBatchGenerationExecutesWithProgressReporter(t *testing.T) {
 }
 
 type fakeBatchExecution struct {
-	result ankitts.BatchResult
 	err    error
+	result ankitts.BatchResult
 }
 
 func (a *fakeBatchExecution) Execute(

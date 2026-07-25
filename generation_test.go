@@ -17,6 +17,7 @@ import (
 )
 
 func TestGenerateStoresAndUpdates(t *testing.T) {
+	t.Parallel()
 	client := &fakeAnki{}
 	provider := &fakeTTS{voice: voice("audio bytes", "mp3")}
 	service := newTestApplication(t, client, provider, nil)
@@ -42,6 +43,7 @@ func TestGenerateStoresAndUpdates(t *testing.T) {
 }
 
 func TestTransformationDeterminesUploadedMedia(t *testing.T) {
+	t.Parallel()
 	client := &fakeAnki{}
 	provider := &fakeTTS{voice: voice("provider audio", "wav")}
 	transformer := &fakeTransformer{output: "transformed audio", format: "mp3"}
@@ -58,6 +60,7 @@ func TestTransformationDeterminesUploadedMedia(t *testing.T) {
 }
 
 func TestProgressUsesConfiguredComponentNames(t *testing.T) {
+	t.Parallel()
 	client := &fakeAnki{}
 	provider := &fakeTTS{
 		voice:       voice("provider audio", "wav"),
@@ -108,6 +111,7 @@ func TestProgressUsesConfiguredComponentNames(t *testing.T) {
 }
 
 func TestMultipleAudioProcessorsRunInRegistrationOrder(t *testing.T) {
+	t.Parallel()
 	client := &fakeAnki{}
 	provider := &fakeTTS{voice: voice("audio", "wav")}
 	services := container(t, provider)
@@ -130,6 +134,7 @@ func TestMultipleAudioProcessorsRunInRegistrationOrder(t *testing.T) {
 }
 
 func TestFailuresBeforeUploadLeaveAnkiUnchanged(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		provider    *fakeTTS
@@ -143,6 +148,7 @@ func TestFailuresBeforeUploadLeaveAnkiUnchanged(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			client := &fakeAnki{}
 			service := newTestApplication(t, client, test.provider, test.transformer)
 			req := spec()
@@ -161,6 +167,7 @@ func TestFailuresBeforeUploadLeaveAnkiUnchanged(t *testing.T) {
 }
 
 func TestCostFailureIsNonFatal(t *testing.T) {
+	t.Parallel()
 	client := &fakeAnki{}
 	provider := &fakeTTS{voice: &fakeVoice{ReadCloser: io.NopCloser(strings.NewReader("audio")), format: "mp3", costErr: errors.New("cost unavailable")}}
 	service := newTestApplication(t, client, provider, nil)
@@ -174,11 +181,12 @@ func TestCostFailureIsNonFatal(t *testing.T) {
 }
 
 func TestFinalAudioValidationAndClosure(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
-		data   []byte
 		format string
 		want   string
+		data   []byte
 	}{
 		{name: "empty", format: "mp3", want: "empty data"},
 		{name: "invalid format", data: []byte("audio"), format: "../mp3", want: "invalid format"},
@@ -186,6 +194,7 @@ func TestFinalAudioValidationAndClosure(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			client := &fakeAnki{}
 			voice := &fakeVoice{ReadCloser: io.NopCloser(bytes.NewReader(test.data)), format: test.format}
 			provider := &fakeTTS{voice: voice}
@@ -205,6 +214,7 @@ func TestFinalAudioValidationAndClosure(t *testing.T) {
 }
 
 func TestMissingTTSServiceIsRejected(t *testing.T) {
+	t.Parallel()
 	service, newErr := New(&fakeAnki{}, NewServiceContainer(), nil, testPipelineConfig(false))
 	if newErr != nil {
 		t.Fatal(newErr)
@@ -216,6 +226,7 @@ func TestMissingTTSServiceIsRejected(t *testing.T) {
 }
 
 func TestNoteUpdateFailureReportsStoredMedia(t *testing.T) {
+	t.Parallel()
 	client := &fakeAnki{updateErr: errors.New("update failed")}
 	provider := &fakeTTS{voice: voice("audio", "mp3")}
 	service := newTestApplication(t, client, provider, nil)
@@ -226,6 +237,7 @@ func TestNoteUpdateFailureReportsStoredMedia(t *testing.T) {
 }
 
 func TestAnkiUpdateRetryDoesNotRepeatStoredMedia(t *testing.T) {
+	t.Parallel()
 	client := &fakeAnki{updateErrs: []error{errors.New("temporary"), errors.New("temporary"), nil}}
 	provider := &fakeTTS{voice: voice("audio", "mp3")}
 	config := testPipelineConfig(false)
@@ -245,6 +257,7 @@ func TestAnkiUpdateRetryDoesNotRepeatStoredMedia(t *testing.T) {
 }
 
 func TestCancellationAfterUploadCompletesNoteUpdate(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	client := &fakeAnki{afterStore: cancel}
 	provider := &fakeTTS{voice: voice("audio", "mp3")}
@@ -273,6 +286,7 @@ func TestCancellationAfterUploadCompletesNoteUpdate(t *testing.T) {
 }
 
 func TestCancellationMarksNotesThatNeverEnteredPipeline(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	client := &fakeAnki{}
 	services := container(t, cancelingTTS{cancel: cancel})
@@ -383,17 +397,16 @@ func testPipelineConfig(withFFmpeg bool) pipeline.Config {
 }
 
 type fakeAnki struct {
-	mediaFilename string
-	mediaData     []byte
-	update        anki.NoteUpdate
-	storeCalls    int
-	updateCalls   int
-	updateErr     error
-	updateErrs    []error
-	afterStore    func()
-
-	updateContextErr error
 	updateDeadline   time.Time
+	update           anki.NoteUpdate
+	updateErr        error
+	updateContextErr error
+	afterStore       func()
+	mediaFilename    string
+	mediaData        []byte
+	updateErrs       []error
+	storeCalls       int
+	updateCalls      int
 }
 
 func (*fakeAnki) FindNoteIDs(context.Context, string) ([]int64, error)    { return nil, nil }
@@ -488,10 +501,10 @@ func voice(data, format string) Voice {
 
 type fakeVoice struct {
 	io.ReadCloser
-	format     string
-	cost       float64
 	costErr    error
 	source     Voice
+	format     string
+	cost       float64
 	closeCalls int
 }
 

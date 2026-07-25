@@ -41,8 +41,8 @@ type PlannedNote struct {
 
 // Plan is a validated, prepared generation batch.
 type Plan struct {
-	jobs        []preparedJob
 	serviceName string
+	jobs        []preparedJob
 }
 
 // Items returns presentation copies in deterministic input order.
@@ -57,11 +57,11 @@ func (p Plan) Items() []PlannedNote {
 }
 
 type preparedJob struct {
-	index            int
-	noteID           int64
+	service          Service
 	text             string
 	destinationField string
-	service          Service
+	index            int
+	noteID           int64
 	willOverwrite    bool
 }
 
@@ -69,8 +69,8 @@ type preparedJob struct {
 type Application struct {
 	anki       AnkiClient
 	services   *ServiceContainer
-	processors []AudioProcessor
 	config     pipeline.Config
+	processors []AudioProcessor
 }
 
 // New constructs an application from named components and their pipeline policies.

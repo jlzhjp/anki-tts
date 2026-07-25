@@ -71,6 +71,7 @@ func TestFactoryConfigKeyTakesPrecedence(t *testing.T) {
 	}
 }
 
+//nolint:tparallel // This test uses t.Setenv, which forbids parallel ancestors.
 func TestFactoryConfigurationErrors(t *testing.T) {
 	t.Setenv(apiKeyEnvironment, "")
 	tests := []struct {
@@ -85,6 +86,7 @@ func TestFactoryConfigurationErrors(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := NewFactory().Create(test.config)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want containing %q", err, test.want)
@@ -94,6 +96,7 @@ func TestFactoryConfigurationErrors(t *testing.T) {
 }
 
 func TestGenerateLeavesSuccessfulResponseStreaming(t *testing.T) {
+	t.Parallel()
 	body := &countingReadCloser{Reader: strings.NewReader("streamed audio")}
 	service := mustService(t, doerFunc(func(*http.Request) (*http.Response, error) {
 		resp := response(http.StatusOK, "audio/mpeg", nil)
@@ -114,6 +117,7 @@ func TestGenerateLeavesSuccessfulResponseStreaming(t *testing.T) {
 }
 
 func TestVoiceResultEnforcesSizeLimit(t *testing.T) {
+	t.Parallel()
 	body := io.NopCloser(strings.NewReader("12345"))
 	voice := &voiceResult{
 		body:   body,
@@ -126,7 +130,9 @@ func TestVoiceResultEnforcesSizeLimit(t *testing.T) {
 }
 
 func TestGenerateErrors(t *testing.T) {
+	t.Parallel()
 	t.Run("empty input", func(t *testing.T) {
+		t.Parallel()
 		service, err := NewFactory().Create(Config{Model: "model", APIKey: "key"})
 		if err != nil {
 			t.Fatal(err)
@@ -138,6 +144,7 @@ func TestGenerateErrors(t *testing.T) {
 	})
 
 	t.Run("API error", func(t *testing.T) {
+		t.Parallel()
 		service := mustService(t, doerFunc(func(*http.Request) (*http.Response, error) {
 			return response(http.StatusUnauthorized, "application/json", []byte(`{"error":{"message":"invalid credentials for secret"}}`)), nil
 		}))
@@ -151,6 +158,7 @@ func TestGenerateErrors(t *testing.T) {
 	})
 
 	t.Run("transport error", func(t *testing.T) {
+		t.Parallel()
 		transportErr := errors.New("offline")
 		service := mustService(t, doerFunc(func(*http.Request) (*http.Response, error) {
 			return nil, transportErr
@@ -162,6 +170,7 @@ func TestGenerateErrors(t *testing.T) {
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
+		t.Parallel()
 		service := mustService(t, doerFunc(func(req *http.Request) (*http.Response, error) {
 			return nil, req.Context().Err()
 		}))

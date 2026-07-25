@@ -8,6 +8,7 @@ import (
 )
 
 func TestLimitedReaderWithinLimit(t *testing.T) {
+	t.Parallel()
 	reader := NewLimitedReader(strings.NewReader("1234"), 4)
 	output, err := io.ReadAll(reader)
 	if err != nil {
@@ -22,6 +23,7 @@ func TestLimitedReaderWithinLimit(t *testing.T) {
 }
 
 func TestLimitedReaderExceedsLimit(t *testing.T) {
+	t.Parallel()
 	reader := NewLimitedReader(strings.NewReader("12345"), 4)
 	_, err := io.ReadAll(reader)
 	if !errors.Is(err, ErrLimitExceeded) {

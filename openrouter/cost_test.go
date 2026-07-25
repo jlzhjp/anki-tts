@@ -6,6 +6,7 @@ import (
 )
 
 func TestOpenRouterCostCalculator(t *testing.T) {
+	t.Parallel()
 	const modelsEndpoint = "https://example.test/models"
 	modelsCalls := 0
 	calculator := newOpenRouterCostCalculator(modelsEndpoint, "secret", doerFunc(func(req *http.Request) (*http.Response, error) {

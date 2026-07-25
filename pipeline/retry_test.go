@@ -10,6 +10,7 @@ import (
 )
 
 func TestRetryRetriesOnlyWrappedOperation(t *testing.T) {
+	t.Parallel()
 	policy := retryConfig(3)
 	storeCalls, updateCalls := 0, 0
 	store, err := Retry(policy, "store", func(_ context.Context, _ int) (string, error) {
@@ -73,6 +74,7 @@ func TestRetryRetriesOnlyWrappedOperation(t *testing.T) {
 }
 
 func TestRetryCancellationDuringBackoffReportsLastAttempt(t *testing.T) {
+	t.Parallel()
 	policy := RetryConfig{MaxAttempts: 3, InitialBackoff: time.Hour, MaxBackoff: time.Hour}
 	started := make(chan struct{})
 	retrying, err := Retry(policy, "operation", func(_ context.Context, value int) (int, error) {
@@ -126,6 +128,7 @@ func TestRetryCancellationDuringBackoffReportsLastAttempt(t *testing.T) {
 }
 
 func TestRetryCanceledBeforeFirstAttemptReportsNothing(t *testing.T) {
+	t.Parallel()
 	var calls int
 	transform, err := Retry(retryConfig(3), "operation", func(_ context.Context, value int) (int, error) {
 		calls++
@@ -149,6 +152,7 @@ func TestRetryCanceledBeforeFirstAttemptReportsNothing(t *testing.T) {
 }
 
 func TestRetryValidationIsLazy(t *testing.T) {
+	t.Parallel()
 	identity := func(_ context.Context, value int) (int, error) { return value, nil }
 	if _, err := Retry(RetryConfig{}, "operation", identity); err == nil {
 		t.Fatal("expected invalid retry policy error")

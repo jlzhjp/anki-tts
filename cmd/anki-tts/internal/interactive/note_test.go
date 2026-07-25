@@ -11,6 +11,7 @@ import (
 )
 
 func TestNoteScreenLoadsOneConsumerWindowAtATime(t *testing.T) {
+	t.Parallel()
 	source := &windownoteSource{notes: testWindowNotes(120)}
 	screen := newNoteScreen(
 		t.Context(),
@@ -48,6 +49,7 @@ func TestNoteScreenLoadsOneConsumerWindowAtATime(t *testing.T) {
 }
 
 func TestNoteScreenRefreshesOnlySelectedNote(t *testing.T) {
+	t.Parallel()
 	source := &windownoteSource{notes: []anki.Note{{
 		ID: 1,
 		Fields: map[string]anki.Field{
@@ -75,11 +77,11 @@ func TestNoteScreenRefreshesOnlySelectedNote(t *testing.T) {
 }
 
 type windownoteSource struct {
-	notes         []anki.Note
 	filter        string
+	notes         []anki.Note
+	lastSelection ankitts.NoteSelection
 	batchSize     int
 	batches       int
-	lastSelection ankitts.NoteSelection
 }
 
 func (s *windownoteSource) SearchNotes(

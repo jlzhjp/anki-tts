@@ -16,19 +16,19 @@ const (
 )
 
 type interactiveWorkflow struct {
+	screens  workflowScreens
 	client   client
 	app      Application
-	options  Options
 	services []string
 	state    workflowState
-	screens  workflowScreens
+	options  Options
 }
 
 type workflowState struct {
-	note             anki.Note
 	sourceField      string
 	destinationField string
 	service          string
+	note             anki.Note
 }
 
 type workflowScreens struct {

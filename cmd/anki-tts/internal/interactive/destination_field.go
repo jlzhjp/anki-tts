@@ -49,5 +49,6 @@ func (s *destinationFieldScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return s, complete(value)
 		}
 	}
-	return s, s.update(message)
+	command := s.update(message)
+	return s, command
 }

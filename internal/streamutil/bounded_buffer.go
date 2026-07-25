@@ -8,9 +8,9 @@ import (
 // BoundedBuffer retains at most its configured number of bytes while
 // reporting every write as fully consumed.
 type BoundedBuffer struct {
-	mu        sync.Mutex
 	buffer    bytes.Buffer
 	limit     int
+	mu        sync.Mutex
 	truncated bool
 }
 

@@ -35,6 +35,6 @@ type Voice interface {
 
 // AudioProcessor associates a pipeline stage name with a Transformer.
 type AudioProcessor struct {
-	Name        string
 	Transformer Transformer
+	Name        string
 }

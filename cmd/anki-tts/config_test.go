@@ -36,6 +36,7 @@ voice = "nova"
 }
 
 func TestBuildServicesWithoutProviders(t *testing.T) {
+	t.Parallel()
 	services, err := buildServices(config{})
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +47,7 @@ func TestBuildServicesWithoutProviders(t *testing.T) {
 }
 
 func TestLoadFFmpegConfig(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte(`[ffmpeg]
 format = "mp3"
@@ -62,8 +64,10 @@ args = ["-codec:a", "libmp3lame", "-b:a", "64k"]
 	}
 }
 
+//nolint:tparallel // Subtests use t.Setenv, which forbids parallel ancestors.
 func TestBuildAudioProcessors(t *testing.T) {
 	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
 		processors, err := buildAudioProcessors(config{})
 		if err != nil || len(processors) != 0 {
 			t.Fatalf("processors=%v error=%v", processors, err)
@@ -93,6 +97,7 @@ func TestBuildAudioProcessors(t *testing.T) {
 		{name: "unsafe extension", format: "../mp3", want: "format must be"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := buildAudioProcessors(configFromFFmpeg(test.format))
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want containing %q", err, test.want)
@@ -110,6 +115,7 @@ func TestBuildAudioProcessors(t *testing.T) {
 }
 
 func TestLoadFFmpegConfigRejectsNonStringArgument(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("[ffmpeg]\nformat = \"mp3\"\nargs = [1]\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -121,6 +127,7 @@ func TestLoadFFmpegConfigRejectsNonStringArgument(t *testing.T) {
 }
 
 func TestLoadExecutionConfig(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.toml")
 	content := `[openrouter]
 model = "openai/tts"
@@ -152,6 +159,7 @@ concurrency = 5
 }
 
 func TestPipelineConfigUsesDefaultsAndRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
 	defaults := pipelineConfig(config{})
 	if len(defaults) != 1 || defaults["anki"].Concurrency != 4 {
 		t.Fatalf("defaults = %+v", defaults)

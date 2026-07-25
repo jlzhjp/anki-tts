@@ -3,6 +3,7 @@ package textutil
 import "testing"
 
 func TestFromHTML(t *testing.T) {
+	t.Parallel()
 	got, err := FromHTML(`<div>Hello&nbsp;<b>world</b><br>next &amp; last</div>`)
 	if err != nil {
 		t.Fatal(err)

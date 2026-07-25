@@ -25,9 +25,9 @@ type noteSource interface {
 }
 
 type noteOptions struct {
-	Query            ankitts.NoteQuery
 	SourceField      string
 	DestinationField string
+	Query            ankitts.NoteQuery
 }
 
 type noteStreamStartedMsg struct {
@@ -43,27 +43,27 @@ type notesLoadedMsg struct {
 }
 
 type noteRefreshedMsg struct {
-	note anki.Note
 	err  error
+	note anki.Note
 }
 
 type noteCandidate struct {
-	note    anki.Note
 	invalid string
+	note    anki.Note
 }
 
 // noteScreen progressively displays notes matching an Anki search.
 type noteScreen struct {
+	ctx          context.Context
+	source       noteSource
+	stopIterator func()
+	cancelStream context.CancelFunc
+	nextResult   func() (ankitts.NoteResult, bool)
 	selectionScreen
-	ctx             context.Context
-	source          noteSource
 	options         noteOptions
-	notes           []anki.Note
-	nextResult      func() (ankitts.NoteResult, bool)
-	stopIterator    func()
-	cancelStream    context.CancelFunc
-	preferredNoteID int64
 	status          string
+	notes           []anki.Note
+	preferredNoteID int64
 	reload          bool
 	loading         bool
 	exhausted       bool
@@ -126,7 +126,8 @@ func (s *noteScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		s.stopIterator = msg.stop
 		s.cancelStream = msg.cancel
 		s.loading = true
-		return s, s.loadWindow()
+		command := s.loadWindow()
+		return s, command
 
 	case notesLoadedMsg:
 		s.loading = false

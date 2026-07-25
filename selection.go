@@ -30,8 +30,8 @@ type NoteLoadOptions struct {
 
 // NoteResult is one ordered result from lazy note hydration.
 type NoteResult struct {
-	Note anki.Note
 	Err  error
+	Note anki.Note
 }
 
 // SearchNotes finds, deduplicates, sorts, and limits matching note IDs.

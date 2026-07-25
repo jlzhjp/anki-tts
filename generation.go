@@ -27,18 +27,18 @@ type ExecuteOptions struct {
 
 // GenerateResult describes a successfully stored voice.
 type GenerateResult struct {
-	Filename string
-	Cost     *float64
 	CostErr  error
+	Cost     *float64
+	Filename string
 }
 
 // ItemResult is the terminal outcome for one planned note.
 type ItemResult struct {
-	Index  int
-	NoteID int64
-	Stage  string
 	Result GenerateResult
 	Err    error
+	Stage  string
+	Index  int
+	NoteID int64
 }
 
 // BatchResult contains exactly one item per planned note in plan order.
@@ -46,8 +46,8 @@ type BatchResult struct{ Items []ItemResult }
 
 // PartialPersistenceError reports media stored before a note update failed.
 type PartialPersistenceError struct {
-	Filename string
 	Err      error
+	Filename string
 }
 
 func (e *PartialPersistenceError) Error() string {
@@ -58,9 +58,9 @@ func (e *PartialPersistenceError) Unwrap() error { return e.Err }
 
 // StageError attaches note and dynamic component context to a failure.
 type StageError struct {
-	NoteID int64
-	Stage  string
 	Err    error
+	Stage  string
+	NoteID int64
 }
 
 func (e *StageError) Error() string {
@@ -70,21 +70,21 @@ func (e *StageError) Error() string {
 func (e *StageError) Unwrap() error { return e.Err }
 
 type synthesizedAudio struct {
-	data      []byte
+	costErr   error
+	cost      *float64
 	format    string
 	mediaType string
-	cost      *float64
-	costErr   error
+	data      []byte
 }
 
 type generationItem struct {
-	job   preparedJob
 	audio synthesizedAudio
+	job   preparedJob
 }
 
 type storedItem struct {
-	item     generationItem
 	filename string
+	item     generationItem
 }
 
 // Execute runs a prepared plan through its dynamically assembled component stages.
@@ -272,8 +272,8 @@ func audioFilename(item generationItem) string {
 	return fmt.Sprintf("anki-tts-%d-%x.%s", item.job.noteID, hash[:6], item.audio.format)
 }
 
-func readVoice(ctx context.Context, voice Voice) ([]byte, string, string, error) {
-	format := safeFormat(voice.Format())
+func readVoice(ctx context.Context, voice Voice) (data []byte, format, mediaType string, err error) {
+	format = safeFormat(voice.Format())
 	if format == "" {
 		_ = voice.Close()
 		return nil, "", "", fmt.Errorf("audio pipeline returned invalid format %q", voice.Format())
@@ -301,11 +301,11 @@ func readVoice(ctx context.Context, voice Voice) ([]byte, string, string, error)
 }
 
 type bufferedVoice struct {
+	costErr error
 	*bytes.Reader
+	cost      *float64
 	format    string
 	mediaType string
-	cost      *float64
-	costErr   error
 }
 
 func (*bufferedVoice) Close() error        { return nil }

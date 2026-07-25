@@ -5,58 +5,104 @@ run:
 
 linters:
   enable:
-    # official
+    # Default
+    - errcheck
     - govet
-
-    # staticcheck suite
+    - ineffassign
     - staticcheck
     - unused
 
-    # correctness
-    - errcheck
-    - ineffassign
+    # Correctness
+    - errorlint
     - nilerr
+    - nilnil
+    - nilnesserr
+    - wastedassign
     - bodyclose
     - contextcheck
+    - fatcontext
+    - noctx
     - durationcheck
-    - errorlint
-    - exhaustive
-    - forcetypeassert
-    - makezero
-    - nilnil
-
-    # bugs
-    - asciicheck
-    - bidichk
+    - rowserrcheck
+    - sqlclosecheck
     - copyloopvar
-    - durationcheck
-    - gocritic
 
-    # style
-    - revive
-    - misspell
-    - whitespace
-    - unconvert
+    # Modern Go
+    - modernize
+    - intrange
+    - exptostd
+    - usestdlibvars
 
-    # performance
+    # Security
+    - gosec
+    - depguard
+
+    # Performance
     - prealloc
     - perfsprint
 
-    # modernization
-    - modernize
+    # Code quality
+    - gocritic
+    - revive
+    - misspell
+    - unconvert
+    - whitespace
 
-    # security
-    - gosec
+    # Observability
+    - loggercheck
+    - sloglint
+    - spancheck
 
-    # tests
+    # Tests
     - testifylint
     - tparallel
+    - paralleltest
 
   exclusions:
     generated: lax
 
+  settings:
+    govet:
+      enable:
+        - fieldalignment
+
+    depguard:
+      rules:
+        main:
+          files:
+            - $all
+          allow:
+            - $gostd
+            - charm.land/bubbles/v2
+            - charm.land/bubbletea/v2
+            - github.com/BurntSushi/toml
+            - github.com/charmbracelet/x/term
+            - github.com/spf13/cobra
+            - golang.org/x/net/html
+            - jlzhjp.dev/ankitts
+
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: error-naming
+        - name: errorf
+        - name: context-as-argument
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - performance
+        - style
+      disabled-checks:
+        # Passing these short-lived values by pointer would add API and
+        # ownership complexity for negligible savings.
+        - hugeParam
+
 formatters:
   enable:
+    # Formatting
     - gofmt
     - gofumpt
     - goimports

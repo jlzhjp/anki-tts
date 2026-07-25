@@ -12,6 +12,7 @@ import (
 )
 
 func TestSearchNotesPassesNativeFilterAndLimitsDeterministically(t *testing.T) {
+	t.Parallel()
 	client := &selectionAnki{ids: []int64{30, 5, 30, 20, 10}}
 	app := newSelectionApplication(t, client)
 	selection, err := app.SearchNotes(t.Context(), NoteQuery{
@@ -30,6 +31,7 @@ func TestSearchNotesPassesNativeFilterAndLimitsDeterministically(t *testing.T) {
 }
 
 func TestSearchNotesRejectsNegativeLimit(t *testing.T) {
+	t.Parallel()
 	app := newSelectionApplication(t, &selectionAnki{})
 	if _, err := app.SearchNotes(t.Context(), NoteQuery{Limit: -1}); err == nil {
 		t.Fatal("negative limit was accepted")
@@ -37,6 +39,7 @@ func TestSearchNotesRejectsNegativeLimit(t *testing.T) {
 }
 
 func TestNotesLoadsLazilyInStableBatches(t *testing.T) {
+	t.Parallel()
 	client := &selectionAnki{notes: map[int64]anki.Note{
 		1: {ID: 1}, 2: {ID: 2}, 3: {ID: 3}, 4: {ID: 4}, 5: {ID: 5},
 	}}
@@ -69,6 +72,7 @@ func TestNotesLoadsLazilyInStableBatches(t *testing.T) {
 }
 
 func TestNotesYieldsOneTerminalError(t *testing.T) {
+	t.Parallel()
 	want := errors.New("collection unavailable")
 	client := &selectionAnki{infoErr: want}
 	app := newSelectionApplication(t, client)
@@ -86,6 +90,7 @@ func TestNotesYieldsOneTerminalError(t *testing.T) {
 }
 
 func TestNotesRejectsNegativeBatchSizeWithoutCallingAnki(t *testing.T) {
+	t.Parallel()
 	client := &selectionAnki{}
 	app := newSelectionApplication(t, client)
 	var results []NoteResult
@@ -116,11 +121,11 @@ func newSelectionApplication(t *testing.T, client *selectionAnki) *Application {
 }
 
 type selectionAnki struct {
-	ids     []int64
+	infoErr error
 	notes   map[int64]anki.Note
 	filter  string
+	ids     []int64
 	batches [][]int64
-	infoErr error
 }
 
 func (s *selectionAnki) FindNoteIDs(_ context.Context, filter string) ([]int64, error) {

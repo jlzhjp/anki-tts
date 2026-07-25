@@ -28,10 +28,10 @@ type application interface {
 }
 
 type runOptions struct {
-	Query       ankitts.NoteQuery
 	FromField   string
 	ToField     string
 	Service     string
+	Query       ankitts.NoteQuery
 	Yes         bool
 	Interactive bool
 }

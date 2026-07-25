@@ -12,6 +12,7 @@ import (
 )
 
 func TestInteractiveWorkflowSkipsConfiguredStagesAndLoopsNotes(t *testing.T) {
+	t.Parallel()
 	app := &workflowApplication{services: []string{"openrouter"}}
 	client := &scriptedClient{}
 	client.prompt = func(screen screen, _ display) (any, error) {
@@ -52,6 +53,7 @@ func TestInteractiveWorkflowSkipsConfiguredStagesAndLoopsNotes(t *testing.T) {
 }
 
 func TestInteractiveWorkflowBackUnwindsVisibleStages(t *testing.T) {
+	t.Parallel()
 	app := &workflowApplication{services: []string{"openrouter"}}
 	client := &scriptedClient{}
 	var sequence []string
@@ -109,6 +111,7 @@ func TestInteractiveWorkflowBackUnwindsVisibleStages(t *testing.T) {
 }
 
 func TestInteractiveWorkflowBackSkipsConfiguredStages(t *testing.T) {
+	t.Parallel()
 	app := &workflowApplication{services: []string{"openrouter"}}
 	client := &scriptedClient{}
 	var sequence []string
@@ -153,6 +156,7 @@ func TestInteractiveWorkflowBackSkipsConfiguredStages(t *testing.T) {
 }
 
 func TestInteractiveWorkflowUsesIterativeNoteCycle(t *testing.T) {
+	t.Parallel()
 	const cycles = 2000
 	app := &workflowApplication{services: []string{"openrouter"}}
 	client := &scriptedClient{}
@@ -192,6 +196,7 @@ func TestInteractiveWorkflowUsesIterativeNoteCycle(t *testing.T) {
 }
 
 func TestInteractiveWorkflowRejectsConfiguredUnknownService(t *testing.T) {
+	t.Parallel()
 	err := Run(
 		t.Context(),
 		&scriptedClient{},

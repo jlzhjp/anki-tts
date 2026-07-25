@@ -14,6 +14,7 @@ import (
 )
 
 func TestBatchConfirmsOverwriteAndProcessesEveryNote(t *testing.T) {
+	t.Parallel()
 	client := &batchAnki{notes: []anki.Note{
 		{ID: 2, ModelName: "Basic", Fields: map[string]anki.Field{"Front": {Value: "two"}, "Audio": {Value: "old"}}},
 		{ID: 1, ModelName: "Basic", Fields: map[string]anki.Field{"Front": {Value: "one"}, "Audio": {Value: ""}}},
@@ -48,6 +49,7 @@ func TestBatchConfirmsOverwriteAndProcessesEveryNote(t *testing.T) {
 }
 
 func TestBatchPreflightRejectsAllNotesBeforeGeneration(t *testing.T) {
+	t.Parallel()
 	client := &batchAnki{notes: []anki.Note{
 		{
 			ID: 1,
@@ -90,6 +92,7 @@ func TestBatchPreflightRejectsAllNotesBeforeGeneration(t *testing.T) {
 }
 
 func TestCompletionGenerationDoesNotLoadRuntimeConfiguration(t *testing.T) {
+	t.Parallel()
 	var output bytes.Buffer
 	cmd := newRootCommand(strings.NewReader(""), &output, io.Discard)
 	cmd.SetArgs([]string{"completion", "bash"})
@@ -102,6 +105,7 @@ func TestCompletionGenerationDoesNotLoadRuntimeConfiguration(t *testing.T) {
 }
 
 func TestConcurrencyFlagsWereRemoved(t *testing.T) {
+	t.Parallel()
 	cmd := newRootCommand(strings.NewReader(""), io.Discard, io.Discard)
 	for _, name := range []string{"synthesis-concurrency", "audio-concurrency"} {
 		if cmd.Flags().Lookup(name) != nil {
@@ -111,6 +115,7 @@ func TestConcurrencyFlagsWereRemoved(t *testing.T) {
 }
 
 func TestNativeFilterReplacesSelectorFlags(t *testing.T) {
+	t.Parallel()
 	cmd := newRootCommand(strings.NewReader(""), io.Discard, io.Discard)
 	if cmd.Flags().Lookup("filter") == nil {
 		t.Fatal("--filter is not registered")
@@ -123,10 +128,10 @@ func TestNativeFilterReplacesSelectorFlags(t *testing.T) {
 }
 
 type batchAnki struct {
-	mu             sync.Mutex
 	notes          []anki.Note
 	updates        []anki.NoteUpdate
 	notesInfoCalls int
+	mu             sync.Mutex
 }
 
 func (b *batchAnki) FindNoteIDs(context.Context, string) ([]int64, error) {

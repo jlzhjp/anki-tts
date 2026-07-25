@@ -11,6 +11,7 @@ import (
 )
 
 func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
+	t.Parallel()
 	app, ankiClient, selection := preparedWorkflow(t, true)
 	failure := errors.New("generation failed")
 	client := &scriptedClient{}
@@ -63,6 +64,7 @@ func TestBatchWorkflowComposesConfirmationExecutionAndSummary(t *testing.T) {
 }
 
 func TestBatchWorkflowYesSkipsConfirmations(t *testing.T) {
+	t.Parallel()
 	app, _, selection := preparedWorkflow(t, true)
 	client := &scriptedClient{}
 	client.prompt = func(screen screen, _ display) (any, error) {
@@ -93,6 +95,7 @@ func TestBatchWorkflowYesSkipsConfirmations(t *testing.T) {
 }
 
 func TestBatchWorkflowRejectionSkipsNoteDetails(t *testing.T) {
+	t.Parallel()
 	app, ankiClient, selection := preparedWorkflow(t, false)
 	client := &scriptedClient{prompt: func(screen screen, _ display) (any, error) {
 		if _, ok := screen.(*confirmationScreen); !ok {

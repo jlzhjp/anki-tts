@@ -16,8 +16,8 @@ type generationApplication interface {
 }
 
 type generationFinishedMsg struct {
-	result ankitts.GenerateResult
 	err    error
+	result ankitts.GenerateResult
 }
 
 // noteAudioGenerationScreen displays progress while generating one note's audio.
@@ -71,7 +71,8 @@ func (s *noteAudioGenerationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd)
 		}
 		return s, complete(msg.result)
 	}
-	return s, s.update(message)
+	command := s.update(message)
+	return s, command
 }
 
 func (s *noteAudioGenerationScreen) BackDisabled() bool { return true }

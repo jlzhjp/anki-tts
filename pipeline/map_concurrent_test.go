@@ -11,6 +11,7 @@ import (
 )
 
 func TestMapConcurrentChangesTypesAndPreservesInputOrder(t *testing.T) {
+	t.Parallel()
 	var active atomic.Int32
 	var maximum atomic.Int32
 	generated, err := MapConcurrent(FromSlice([]int{0, 1, 2, 3, 4, 5}), "openrouter", 3,
@@ -56,6 +57,7 @@ func TestMapConcurrentChangesTypesAndPreservesInputOrder(t *testing.T) {
 }
 
 func TestMapConcurrentClosesEmptyWorkerPool(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	stream, err := MapConcurrent(FromSlice([]int(nil)), "empty", 16,
 		func(_ context.Context, value int) (int, error) {
@@ -75,6 +77,7 @@ func TestMapConcurrentClosesEmptyWorkerPool(t *testing.T) {
 }
 
 func TestMapConcurrentBypassesRemainingStagesAfterFailure(t *testing.T) {
+	t.Parallel()
 	first, err := MapConcurrent(FromSlice([]int{0, 1, 2}), "first", 2,
 		func(_ context.Context, id int) (testItem, error) {
 			if id == 1 {
@@ -103,6 +106,7 @@ func TestMapConcurrentBypassesRemainingStagesAfterFailure(t *testing.T) {
 }
 
 func TestMapConcurrentWaitsForInFlightTransforms(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{}, 2)
 	stream, err := MapConcurrent(FromSlice([]int{0, 1, 2}), "work", 2,
 		func(ctx context.Context, value int) (int, error) {
@@ -128,6 +132,7 @@ func TestMapConcurrentWaitsForInFlightTransforms(t *testing.T) {
 }
 
 func TestMapConcurrentCompositionValidationIsLazy(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	stream, err := MapConcurrent(FromSlice([]int{1}), "configured", 1,
 		func(_ context.Context, value int) (int, error) {
@@ -150,6 +155,7 @@ func TestMapConcurrentCompositionValidationIsLazy(t *testing.T) {
 }
 
 func TestMapConcurrentAllowsRepeatedStageLabels(t *testing.T) {
+	t.Parallel()
 	first, err := MapConcurrent(FromSlice([]testItem{{}}), "anki", 1, appendStage("store"))
 	if err != nil {
 		t.Fatal(err)

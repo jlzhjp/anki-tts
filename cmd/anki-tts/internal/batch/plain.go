@@ -166,10 +166,10 @@ func red(value string) string {
 }
 
 type plainProgressReporter struct {
-	mu           sync.Mutex
 	output       io.Writer
 	descriptions map[int]string
 	stages       map[int]string
+	mu           sync.Mutex
 }
 
 func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {

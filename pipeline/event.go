@@ -21,16 +21,14 @@ const (
 
 // Event describes one operation performed for a pipeline item.
 type Event struct {
-	Kind      EventKind
-	Index     int
-	Stage     string
-	Operation string
-	// Attempt identifies the attempt being reported. For Retrying, it is the
-	// failed attempt; the next attempt is Attempt + 1.
-	Attempt     int
-	MaxAttempts int
 	RetryAt     time.Time
 	Err         error
+	Stage       string
+	Operation   string
+	Index       int
+	Attempt     int
+	MaxAttempts int
+	Kind        EventKind
 }
 
 // Observer receives concurrent pipeline events. Implementations must be safe
@@ -48,9 +46,9 @@ func (f ObserverFunc) Report(event Event) { f(event) }
 type scopeContextKey struct{}
 
 type operationScope struct {
-	index    int
-	stage    string
 	observer Observer
+	stage    string
+	index    int
 }
 
 func report(ctx context.Context, config RetryConfig, event Event) {

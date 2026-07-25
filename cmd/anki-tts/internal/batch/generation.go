@@ -24,24 +24,24 @@ type executionApplication interface {
 
 // outcome contains the complete result of a batch execution.
 type outcome struct {
-	result ankitts.BatchResult
 	err    error
+	result ankitts.BatchResult
 }
 
 type finishedMsg struct {
-	result ankitts.BatchResult
 	err    error
+	result ankitts.BatchResult
 }
 
 type progressTickMsg time.Time
 
 type noteProgress struct {
+	retryAt     time.Time
+	err         error
 	stage       string
 	description string
 	attempt     int
 	maxAttempts int
-	retryAt     time.Time
-	err         error
 	working     bool
 	done        bool
 }
@@ -50,12 +50,12 @@ type noteProgress struct {
 type generationScreen struct {
 	ctx          context.Context
 	app          executionApplication
-	plan         ankitts.Plan
-	notes        []ankitts.PlannedNote
+	executionErr error
 	events       chan ankitts.ProgressEvent
 	progress     map[int]noteProgress
+	plan         ankitts.Plan
+	notes        []ankitts.PlannedNote
 	result       ankitts.BatchResult
-	executionErr error
 	finished     bool
 }
 
@@ -108,7 +108,8 @@ func (s *generationScreen) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			state.err = nil
 		}
 		s.progress[msg.Index] = state
-		return s, s.waitForProgress()
+		command := s.waitForProgress()
+		return s, command
 
 	case progressTickMsg:
 		if !s.finished {

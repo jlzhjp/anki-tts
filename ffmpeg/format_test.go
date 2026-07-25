@@ -3,6 +3,7 @@ package ffmpeg
 import "testing"
 
 func TestFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input     string
 		want      Format
@@ -17,6 +18,7 @@ func TestFormat(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.input, func(t *testing.T) {
+			t.Parallel()
 			format, err := ParseFormat(test.input)
 			if err != nil {
 				t.Fatal(err)
@@ -29,6 +31,7 @@ func TestFormat(t *testing.T) {
 }
 
 func TestParseFormatRejectsUnsupportedFormat(t *testing.T) {
+	t.Parallel()
 	if _, err := ParseFormat("matroska"); err == nil {
 		t.Fatal("expected unsupported format error")
 	}

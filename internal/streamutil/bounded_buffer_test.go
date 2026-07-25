@@ -3,6 +3,7 @@ package streamutil
 import "testing"
 
 func TestBoundedBufferWithinLimit(t *testing.T) {
+	t.Parallel()
 	buffer := NewBoundedBuffer(5)
 	n, err := buffer.Write([]byte("hello"))
 	if err != nil || n != 5 {
@@ -14,6 +15,7 @@ func TestBoundedBufferWithinLimit(t *testing.T) {
 }
 
 func TestBoundedBufferTruncatesWithoutShortWrite(t *testing.T) {
+	t.Parallel()
 	buffer := NewBoundedBuffer(4)
 	n, err := buffer.Write([]byte("12345"))
 	if err != nil || n != 5 {

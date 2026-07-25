@@ -11,6 +11,7 @@ import (
 )
 
 func TestListDecks(t *testing.T) {
+	t.Parallel()
 	client := testClient(t, func(t *testing.T, got request) any {
 		if got.Action != "deckNames" || got.Version != apiVersion {
 			t.Fatalf("unexpected request: %+v", got)
@@ -29,6 +30,7 @@ func TestListDecks(t *testing.T) {
 }
 
 func TestListNoteTemplateMetadata(t *testing.T) {
+	t.Parallel()
 	client := NewClient(WithHTTPClient(doerFunc(func(req *http.Request) (*http.Response, error) {
 		var got request
 		if err := json.NewDecoder(req.Body).Decode(&got); err != nil {
@@ -55,6 +57,7 @@ func TestListNoteTemplateMetadata(t *testing.T) {
 }
 
 func TestFindNoteIDs(t *testing.T) {
+	t.Parallel()
 	client := testClient(t, func(t *testing.T, got request) any {
 		if got.Action != "findNotes" {
 			t.Fatalf("action = %q, want findNotes", got.Action)
@@ -78,6 +81,7 @@ func TestFindNoteIDs(t *testing.T) {
 }
 
 func TestNotesInfo(t *testing.T) {
+	t.Parallel()
 	client := testClient(t, func(t *testing.T, got request) any {
 		if got.Action != "notesInfo" {
 			t.Fatalf("action = %q, want notesInfo", got.Action)
@@ -101,6 +105,7 @@ func TestNotesInfo(t *testing.T) {
 }
 
 func TestNotesInfoEmptySkipsRequest(t *testing.T) {
+	t.Parallel()
 	client := testClient(t, func(t *testing.T, got request) any {
 		t.Fatalf("unexpected action %q", got.Action)
 		return nil
@@ -112,6 +117,7 @@ func TestNotesInfoEmptySkipsRequest(t *testing.T) {
 }
 
 func TestUpdateNotes(t *testing.T) {
+	t.Parallel()
 	var ids []int64
 	client := testClient(t, func(t *testing.T, got request) any {
 		if got.Action != "updateNoteFields" {
@@ -119,8 +125,8 @@ func TestUpdateNotes(t *testing.T) {
 		}
 		params := decodeParams[struct {
 			Note struct {
-				ID     int64             `json:"id"`
 				Fields map[string]string `json:"fields"`
+				ID     int64             `json:"id"`
 			} `json:"note"`
 		}](t, got.Params)
 		ids = append(ids, params.Note.ID)
@@ -140,6 +146,7 @@ func TestUpdateNotes(t *testing.T) {
 }
 
 func TestStoreMediaFile(t *testing.T) {
+	t.Parallel()
 	client := NewClient(WithHTTPClient(doerFunc(func(req *http.Request) (*http.Response, error) {
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -149,12 +156,12 @@ func TestStoreMediaFile(t *testing.T) {
 			t.Fatalf("ContentLength=%d body=%d TransferEncoding=%v", req.ContentLength, len(body), req.TransferEncoding)
 		}
 		var got struct {
-			Action  string `json:"action"`
-			Version int    `json:"version"`
-			Params  struct {
+			Params struct {
 				Filename string `json:"filename"`
 				Data     string `json:"data"`
 			} `json:"params"`
+			Action  string `json:"action"`
+			Version int    `json:"version"`
 		}
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Fatal(err)
@@ -175,6 +182,7 @@ func TestStoreMediaFile(t *testing.T) {
 }
 
 func TestStoreMediaFileValidation(t *testing.T) {
+	t.Parallel()
 	client := NewClient()
 	if _, err := client.StoreMediaFile(t.Context(), "../audio.mp3", []byte("audio")); err == nil {
 		t.Fatal("expected invalid filename error")
@@ -185,6 +193,7 @@ func TestStoreMediaFileValidation(t *testing.T) {
 }
 
 func TestAnkiConnectError(t *testing.T) {
+	t.Parallel()
 	client := NewClient(WithHTTPClient(doerFunc(func(*http.Request) (*http.Response, error) {
 		return jsonResponse(`{"result":null,"error":"collection unavailable"}`), nil
 	})))
@@ -199,8 +208,8 @@ func testClient(t *testing.T, handler func(*testing.T, request) any) *Client {
 	httpClient := doerFunc(func(r *http.Request) (*http.Response, error) {
 		var raw struct {
 			Action  string          `json:"action"`
-			Version int             `json:"version"`
 			Params  json.RawMessage `json:"params"`
+			Version int             `json:"version"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 			t.Fatal(err)

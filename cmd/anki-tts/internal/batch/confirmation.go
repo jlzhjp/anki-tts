@@ -12,11 +12,11 @@ import (
 // confirmationScreen displays the notes included in a batch operation.
 type confirmationScreen struct {
 	noteIDs   []int64
-	overwrite bool
 	height    int
+	offset    int
+	overwrite bool
 	sized     bool
 	altScreen bool
-	offset    int
 }
 
 // confirm presents or resumes a batch confirmation screen.
@@ -89,7 +89,7 @@ func (s *confirmationScreen) View() tea.View {
 	return view
 }
 
-func (s *confirmationScreen) SetSize(_ int, height int) {
+func (s *confirmationScreen) SetSize(_, height int) {
 	s.height = height
 	if !s.sized {
 		s.sized = true

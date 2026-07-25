@@ -29,8 +29,8 @@ type HTTPClient interface {
 
 // Client communicates with AnkiConnect.
 type Client struct {
-	endpoint   string
 	httpClient HTTPClient
+	endpoint   string
 }
 
 // Option configures a Client.
@@ -79,24 +79,24 @@ type Field struct {
 
 // Note contains the information AnkiConnect returns for a note.
 type Note struct {
-	ID        int64            `json:"noteId"`
+	Fields    map[string]Field `json:"fields"`
 	ModelName string           `json:"modelName"`
 	Tags      []string         `json:"tags"`
-	Fields    map[string]Field `json:"fields"`
 	Cards     []int64          `json:"cards"`
+	ID        int64            `json:"noteId"`
 }
 
 // NoteUpdate describes the fields to replace on an existing note. Fields not
 // present in Fields are left unchanged by AnkiConnect.
 type NoteUpdate struct {
-	ID     int64
 	Fields map[string]string
+	ID     int64
 }
 
 type request struct {
+	Params  any    `json:"params,omitempty"`
 	Action  string `json:"action"`
 	Version int    `json:"version"`
-	Params  any    `json:"params,omitempty"`
 }
 
 type response[T any] struct {
@@ -173,8 +173,8 @@ func (c *Client) UpdateNote(ctx context.Context, update NoteUpdate) error {
 
 	params := struct {
 		Note struct {
-			ID     int64             `json:"id"`
 			Fields map[string]string `json:"fields"`
+			ID     int64             `json:"id"`
 		} `json:"note"`
 	}{}
 	params.Note.ID = update.ID

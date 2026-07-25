@@ -8,9 +8,9 @@ import (
 )
 
 type listItem struct {
+	value       any
 	title       string
 	description string
-	value       any
 }
 
 func (i listItem) Title() string       { return i.title }
