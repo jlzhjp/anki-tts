@@ -95,10 +95,6 @@ linters:
         - experimental
         - performance
         - style
-      disabled-checks:
-        # Passing these short-lived values by pointer would add API and
-        # ownership complexity for negligible savings.
-        - hugeParam
 
 formatters:
   enable:

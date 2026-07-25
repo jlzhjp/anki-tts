@@ -78,7 +78,7 @@ func TestProgressUsesConfiguredComponentNames(t *testing.T) {
 	var stages []string
 	var descriptions []string
 	var completed int
-	_, err = app.Execute(t.Context(), plan, ExecuteOptions{Progress: ProgressReporterFunc(func(event ProgressEvent) {
+	_, err = app.Execute(t.Context(), plan, ExecuteOptions{Progress: ProgressReporterFunc(func(event *ProgressEvent) {
 		if event.Kind == ProgressStarted {
 			stages = append(stages, event.Stage)
 		}

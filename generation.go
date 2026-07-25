@@ -109,7 +109,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 	jobs := pipeline.FromSlice(plan.jobs)
 	generated, err := pipeline.MapConcurrent(jobs, plan.serviceName, serviceConfig.Concurrency,
 		func(ctx context.Context, job preparedJob) (generationItem, error) {
-			return synthesizeWithRetry(withProgress(ctx, options.Progress, ProgressEvent{
+			return synthesizeWithRetry(withProgress(ctx, options.Progress, &ProgressEvent{
 				Index: job.index, NoteID: job.noteID, Stage: plan.serviceName,
 			}), job)
 		})
@@ -121,7 +121,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		processorConfig := a.config[processor.Name]
 		processWithRetry, retryErr := pipeline.Retry(processorConfig.Retry, "transform",
 			func(ctx context.Context, item generationItem) (generationItem, error) {
-				audio, err := processAudio(ctx, processor.Transformer, item.audio)
+				audio, err := processAudio(ctx, processor.Transformer, &item.audio)
 				return generationItem{job: item.job, audio: audio}, err
 			})
 		if retryErr != nil {
@@ -129,7 +129,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		}
 		generated, err = pipeline.MapConcurrent(generated, processor.Name, processorConfig.Concurrency,
 			func(ctx context.Context, item generationItem) (generationItem, error) {
-				return processWithRetry(withProgress(ctx, options.Progress, ProgressEvent{
+				return processWithRetry(withProgress(ctx, options.Progress, &ProgressEvent{
 					Index: item.job.index, NoteID: item.job.noteID, Stage: processor.Name,
 				}), item)
 			})
@@ -141,7 +141,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 	storeWithRetry, err := pipeline.Retry(persistenceConfig.Retry, "store media",
 		func(ctx context.Context, item generationItem) (storedItem, error) {
 			ReportProgress(ctx, "Storing media in Anki")
-			filename := audioFilename(item)
+			filename := audioFilename(&item)
 			storedFilename, err := a.anki.StoreMediaFile(ctx, filename, item.audio.data)
 			return storedItem{item: item, filename: storedFilename}, err
 		})
@@ -188,19 +188,19 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 	}
 	persisted, err := pipeline.MapConcurrent(generated, persistenceStage, persistenceConfig.Concurrency,
 		func(ctx context.Context, item generationItem) (GenerateResult, error) {
-			return persist(withProgress(ctx, options.Progress, ProgressEvent{
+			return persist(withProgress(ctx, options.Progress, &ProgressEvent{
 				Index: item.job.index, NoteID: item.job.noteID, Stage: persistenceStage,
 			}), item)
 		})
 	if err != nil {
 		return result, err
 	}
-	observer := pipeline.ObserverFunc(func(event pipeline.Event) {
+	observer := pipeline.ObserverFunc(func(event *pipeline.Event) {
 		if options.Progress == nil {
 			return
 		}
 		job := plan.jobs[event.Index]
-		options.Progress.Report(ProgressEvent{
+		options.Progress.Report(&ProgressEvent{
 			Kind: progressKind(event.Kind), Index: event.Index, NoteID: job.noteID,
 			Stage: event.Stage, Attempt: event.Attempt,
 			MaxAttempts: event.MaxAttempts, RetryAt: event.RetryAt, Err: event.Err,
@@ -250,7 +250,7 @@ func synthesize(ctx context.Context, job preparedJob) (synthesizedAudio, error) 
 	return synthesizedAudio{data: data, format: format, mediaType: mediaType, cost: cost, costErr: costErr}, nil
 }
 
-func processAudio(ctx context.Context, transformer Transformer, source synthesizedAudio) (synthesizedAudio, error) {
+func processAudio(ctx context.Context, transformer Transformer, source *synthesizedAudio) (synthesizedAudio, error) {
 	voice := Voice(&bufferedVoice{Reader: bytes.NewReader(source.data), format: source.format, mediaType: source.mediaType, cost: source.cost, costErr: source.costErr})
 	transformed, err := transformer.Transform(ctx, voice)
 	if err != nil {
@@ -267,7 +267,7 @@ func processAudio(ctx context.Context, transformer Transformer, source synthesiz
 	return synthesizedAudio{data: data, format: format, mediaType: mediaType, cost: source.cost, costErr: source.costErr}, nil
 }
 
-func audioFilename(item generationItem) string {
+func audioFilename(item *generationItem) string {
 	hash := sha256.Sum256(item.audio.data)
 	return fmt.Sprintf("anki-tts-%d-%x.%s", item.job.noteID, hash[:6], item.audio.format)
 }

@@ -193,17 +193,17 @@ func (s *outputStream) finalize(endErr error) error {
 	}
 	_ = s.command.Close()
 	_ = s.input.Close()
-	return outputStreamResult{
+	return (&outputStreamResult{
 		outputErr:  outputErr,
 		contextErr: s.ctx.Err(),
 		processErr: s.command.Wait(),
 		diagnostic: strings.TrimSpace(s.stderr.String()),
 		bytesRead:  s.output.BytesRead(),
 		maxBytes:   s.output.Limit(),
-	}.resultError()
+	}).resultError()
 }
 
-func (r outputStreamResult) resultError() error {
+func (r *outputStreamResult) resultError() error {
 	switch {
 	case errors.Is(r.outputErr, errOutputTooLarge):
 		return fmt.Errorf("transform audio with FFmpeg: %w (%d bytes)", r.outputErr, r.maxBytes)

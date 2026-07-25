@@ -195,7 +195,7 @@ func (a *fakeBatchExecution) Execute(
 	options ankitts.ExecuteOptions,
 ) (ankitts.BatchResult, error) {
 	if options.Progress != nil {
-		options.Progress.Report(ankitts.ProgressEvent{
+		options.Progress.Report(&ankitts.ProgressEvent{
 			Kind: ankitts.ProgressStarted,
 		})
 	}

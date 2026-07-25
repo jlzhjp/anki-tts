@@ -17,7 +17,7 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 	value, screen, err := chooseDestinationField(
 		t.Context(),
 		client,
-		note,
+		&note,
 		nil,
 		display{},
 	)
@@ -31,7 +31,7 @@ func TestChooseDestinationFieldCreatesThenResumesScreen(t *testing.T) {
 	_, resumed, err := chooseDestinationField(
 		t.Context(),
 		client,
-		note,
+		&note,
 		screen,
 		display{},
 	)
@@ -48,7 +48,7 @@ func TestChooseSourceFieldRejectsNoteWithoutText(t *testing.T) {
 	_, _, err := chooseSourceField(
 		t.Context(),
 		&fakeClient{},
-		anki.Note{Fields: map[string]anki.Field{"Front": {Value: " "}}},
+		&anki.Note{Fields: map[string]anki.Field{"Front": {Value: " "}}},
 		nil,
 		display{},
 	)

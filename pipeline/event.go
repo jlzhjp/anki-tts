@@ -34,14 +34,14 @@ type Event struct {
 // Observer receives concurrent pipeline events. Implementations must be safe
 // for concurrent use and return promptly so they do not block stage workers.
 type Observer interface {
-	Report(Event)
+	Report(*Event)
 }
 
 // ObserverFunc adapts a function to an Observer.
-type ObserverFunc func(Event)
+type ObserverFunc func(*Event)
 
 // Report calls f with event.
-func (f ObserverFunc) Report(event Event) { f(event) }
+func (f ObserverFunc) Report(event *Event) { f(event) }
 
 type scopeContextKey struct{}
 
@@ -51,7 +51,7 @@ type operationScope struct {
 	index    int
 }
 
-func report(ctx context.Context, config RetryConfig, event Event) {
+func report(ctx context.Context, config RetryConfig, event *Event) {
 	scope, ok := ctx.Value(scopeContextKey{}).(operationScope)
 	if !ok || scope.observer == nil {
 		return

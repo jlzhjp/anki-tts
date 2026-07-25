@@ -34,7 +34,7 @@ func TestInteractiveWorkflowSkipsConfiguredStagesAndLoopsNotes(t *testing.T) {
 		t.Context(),
 		client,
 		app,
-		Options{
+		&Options{
 			FromField: "Front",
 			ToField:   "Audio",
 			Service:   "openrouter",
@@ -89,7 +89,7 @@ func TestInteractiveWorkflowBackUnwindsVisibleStages(t *testing.T) {
 		t.Context(),
 		client,
 		app,
-		Options{
+		&Options{
 			Yes: true,
 		},
 	)
@@ -141,7 +141,7 @@ func TestInteractiveWorkflowBackSkipsConfiguredStages(t *testing.T) {
 		t.Context(),
 		client,
 		app,
-		Options{
+		&Options{
 			ToField: "Audio",
 			Yes:     true,
 		},
@@ -180,7 +180,7 @@ func TestInteractiveWorkflowUsesIterativeNoteCycle(t *testing.T) {
 		t.Context(),
 		client,
 		app,
-		Options{
+		&Options{
 			FromField: "Front",
 			ToField:   "Audio",
 			Service:   "openrouter",
@@ -201,7 +201,7 @@ func TestInteractiveWorkflowRejectsConfiguredUnknownService(t *testing.T) {
 		t.Context(),
 		&scriptedClient{},
 		&workflowApplication{services: []string{"openrouter"}},
-		Options{Service: "missing"},
+		&Options{Service: "missing"},
 	)
 	if err == nil {
 		t.Fatal("expected an unknown-service error")

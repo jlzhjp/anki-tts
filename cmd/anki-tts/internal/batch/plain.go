@@ -172,7 +172,7 @@ type plainProgressReporter struct {
 	mu           sync.Mutex
 }
 
-func (r *plainProgressReporter) Report(event ankitts.ProgressEvent) {
+func (r *plainProgressReporter) Report(event *ankitts.ProgressEvent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

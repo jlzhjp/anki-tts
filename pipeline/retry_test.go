@@ -43,11 +43,11 @@ func TestRetryRetriesOnlyWrappedOperation(t *testing.T) {
 	}
 	var eventsMu sync.Mutex
 	var events []Event
-	_, err = Collect(t.Context(), stream, ObserverFunc(func(event Event) {
+	_, err = Collect(t.Context(), stream, ObserverFunc(func(event *Event) {
 		eventsMu.Lock()
 		defer eventsMu.Unlock()
 		if event.Operation == "update" {
-			events = append(events, event)
+			events = append(events, *event)
 		}
 	}))
 	if err != nil {
@@ -97,10 +97,10 @@ func TestRetryCancellationDuringBackoffReportsLastAttempt(t *testing.T) {
 	var events []Event
 	done := make(chan error, 1)
 	go func() {
-		_, err := Collect(ctx, stream, ObserverFunc(func(event Event) {
+		_, err := Collect(ctx, stream, ObserverFunc(func(event *Event) {
 			eventsMu.Lock()
 			defer eventsMu.Unlock()
-			events = append(events, event)
+			events = append(events, *event)
 		}))
 		done <- err
 	}()
@@ -140,7 +140,7 @@ func TestRetryCanceledBeforeFirstAttemptReportsNothing(t *testing.T) {
 	var events []Event
 	ctx, cancel := context.WithCancel(t.Context())
 	ctx = context.WithValue(ctx, scopeContextKey{}, operationScope{
-		observer: ObserverFunc(func(event Event) { events = append(events, event) }),
+		observer: ObserverFunc(func(event *Event) { events = append(events, *event) }),
 	})
 	cancel()
 	if _, err := transform(ctx, 1); !errors.Is(err, context.Canceled) {

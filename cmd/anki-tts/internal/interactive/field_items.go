@@ -11,7 +11,7 @@ import (
 	"jlzhjp.dev/ankitts/internal/textutil"
 )
 
-func fieldListItems(note anki.Note, nonEmpty bool) []list.Item {
+func fieldListItems(note *anki.Note, nonEmpty bool) []list.Item {
 	type namedField struct {
 		name  string
 		field anki.Field

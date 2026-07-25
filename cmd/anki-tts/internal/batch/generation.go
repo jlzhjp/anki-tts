@@ -166,9 +166,9 @@ type progressReporter struct {
 	events chan<- ankitts.ProgressEvent
 }
 
-func (r progressReporter) Report(event ankitts.ProgressEvent) {
+func (r progressReporter) Report(event *ankitts.ProgressEvent) {
 	select {
-	case r.events <- event:
+	case r.events <- *event:
 	case <-r.ctx.Done():
 	}
 }

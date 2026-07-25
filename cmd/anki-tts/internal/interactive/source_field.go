@@ -13,7 +13,7 @@ import (
 // sourceFieldScreen displays non-empty fields that can provide speech text.
 type sourceFieldScreen struct{ selectionScreen }
 
-func newSourceFieldScreen(note anki.Note) (*sourceFieldScreen, error) {
+func newSourceFieldScreen(note *anki.Note) (*sourceFieldScreen, error) {
 	fields := fieldListItems(note, true)
 	if len(fields) == 0 {
 		return nil, errors.New("this note has no non-empty source fields")
@@ -27,7 +27,7 @@ func newSourceFieldScreen(note anki.Note) (*sourceFieldScreen, error) {
 func chooseSourceField(
 	ctx context.Context,
 	client client,
-	note anki.Note,
+	note *anki.Note,
 	previous *sourceFieldScreen,
 	display display,
 ) (string, *sourceFieldScreen, error) {

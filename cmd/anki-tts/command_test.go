@@ -31,7 +31,7 @@ func TestBatchConfirmsOverwriteAndProcessesEveryNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	err = runApplication(t.Context(), app, runOptions{
+	err = runApplication(t.Context(), app, &runOptions{
 		FromField: "Front", ToField: "Audio", Service: "Test",
 	}, strings.NewReader("yes\ny\n"), &output)
 	if err != nil {
@@ -79,7 +79,7 @@ func TestBatchPreflightRejectsAllNotesBeforeGeneration(t *testing.T) {
 	err = runApplication(
 		t.Context(),
 		app,
-		runOptions{FromField: "Front", ToField: "Audio", Service: "Test"},
+		&runOptions{FromField: "Front", ToField: "Audio", Service: "Test"},
 		strings.NewReader("y\n"),
 		io.Discard,
 	)

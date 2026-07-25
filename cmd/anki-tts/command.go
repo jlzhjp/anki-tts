@@ -40,7 +40,7 @@ syntax. With an empty filter, batch mode considers every note.`,
 			if err != nil {
 				return err
 			}
-			return runApplication(cmd.Context(), app, runOptions{
+			return runApplication(cmd.Context(), app, &runOptions{
 				Query:     ankitts.NoteQuery{Filter: options.filter, Limit: options.limit},
 				FromField: options.fromField, ToField: options.toField,
 				Service: options.service, Yes: options.yes, Interactive: options.interactive,

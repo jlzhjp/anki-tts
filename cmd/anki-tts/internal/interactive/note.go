@@ -295,7 +295,7 @@ func (s *noteScreen) stopStream() {
 func noteListItems(notes []anki.Note, options noteOptions) []list.Item {
 	items := make([]list.Item, 0, len(notes))
 	for _, note := range notes {
-		title := firstFieldValue(note)
+		title := firstFieldValue(&note)
 		if title == "" {
 			title = "(empty note)"
 		}
@@ -325,7 +325,7 @@ func noteListItems(notes []anki.Note, options noteOptions) []list.Item {
 	return items
 }
 
-func firstFieldValue(note anki.Note) string {
+func firstFieldValue(note *anki.Note) string {
 	fields := fieldListItems(note, true)
 	if len(fields) == 0 {
 		return ""

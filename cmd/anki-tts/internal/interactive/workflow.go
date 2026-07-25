@@ -16,7 +16,7 @@ func Run(
 	ctx context.Context,
 	client terminal.Client,
 	app Application,
-	options Options,
+	options *Options,
 ) error {
 	services := app.ServiceNames()
 	if len(services) == 0 {
@@ -27,7 +27,7 @@ func Run(
 	}
 
 	workflow := &interactiveWorkflow{
-		client: client, app: app, options: options, services: services,
+		client: client, app: app, options: *options, services: services,
 	}
 	return workflow.run(ctx)
 }
@@ -59,7 +59,7 @@ func (w *interactiveWorkflow) runNotes(ctx context.Context) (navigation, error) 
 			return navigateBack, err
 		}
 
-		w.setNote(note)
+		w.setNote(&note)
 		next, err := w.runNote(ctx)
 		if err != nil {
 			return navigateBack, err
@@ -80,7 +80,7 @@ func (w *interactiveWorkflow) runNote(ctx context.Context) (navigation, error) {
 		field, screen, err := chooseSourceField(
 			ctx,
 			w.client,
-			w.state.note,
+			&w.state.note,
 			w.screens.source,
 			w.display(),
 		)
@@ -114,7 +114,7 @@ func (w *interactiveWorkflow) withSource(ctx context.Context) (navigation, error
 		field, screen, err := chooseDestinationField(
 			ctx,
 			w.client,
-			w.state.note,
+			&w.state.note,
 			w.screens.destination,
 			w.display(),
 		)

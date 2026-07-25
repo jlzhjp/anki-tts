@@ -39,11 +39,11 @@ type workflowScreens struct {
 	service     *ttsServiceScreen
 }
 
-func (w *interactiveWorkflow) setNote(note anki.Note) {
+func (w *interactiveWorkflow) setNote(note *anki.Note) {
 	if note.ID == w.state.note.ID {
 		return
 	}
-	w.state.note = note
+	w.state.note = *note
 	w.state.sourceField = ""
 	w.state.destinationField = ""
 	w.state.service = ""
@@ -95,7 +95,7 @@ func (w *interactiveWorkflow) display() display {
 	return display{Context: w.state.contextLine()}
 }
 
-func (s workflowState) contextLine() string {
+func (s *workflowState) contextLine() string {
 	parts := make([]string, 0, 4)
 	if s.note.ID != 0 {
 		parts = append(parts, fmt.Sprintf("Note: %d", s.note.ID))

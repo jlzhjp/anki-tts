@@ -24,12 +24,12 @@ func Retry[I, O any](config RetryConfig, operation string, transform Transform[I
 			ctx,
 			config,
 			func(attempt int) {
-				report(ctx, config, Event{
+				report(ctx, config, &Event{
 					Kind: Started, Operation: operation, Attempt: attempt,
 				})
 			},
 			func(attempt int, retryAt time.Time, err error) {
-				report(ctx, config, Event{
+				report(ctx, config, &Event{
 					Kind: Retrying, Operation: operation, Attempt: attempt,
 					RetryAt: retryAt, Err: err,
 				})
@@ -47,7 +47,7 @@ func Retry[I, O any](config RetryConfig, operation string, transform Transform[I
 			if err != nil {
 				kind = Failed
 			}
-			report(ctx, config, Event{
+			report(ctx, config, &Event{
 				Kind: kind, Operation: operation, Attempt: attempts, Err: err,
 			})
 		}

@@ -39,7 +39,7 @@ type runOptions struct {
 func runApplication(
 	ctx context.Context,
 	app application,
-	options runOptions,
+	options *runOptions,
 	input io.Reader,
 	output io.Writer,
 ) error {
@@ -49,7 +49,7 @@ func runApplication(
 	if options.Interactive {
 		return terminal.Run(ctx, input, output, true, func(ctx context.Context, client terminal.Client) terminal.Result {
 			return terminal.Result{
-				Err: interactive.Run(ctx, client, app, interactive.Options{
+				Err: interactive.Run(ctx, client, app, &interactive.Options{
 					Query:     options.Query,
 					FromField: options.FromField,
 					ToField:   options.ToField,
@@ -91,7 +91,7 @@ func isTerminal(stream any) bool {
 	return ok && term.IsTerminal(file.Fd())
 }
 
-func validateBatchOptions(options runOptions) error {
+func validateBatchOptions(options *runOptions) error {
 	required := []struct{ name, value string }{
 		{"--from-field", options.FromField},
 		{"--to-field", options.ToField},

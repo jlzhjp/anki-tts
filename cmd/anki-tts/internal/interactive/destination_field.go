@@ -12,7 +12,7 @@ import (
 // destinationFieldScreen displays fields that can receive generated audio.
 type destinationFieldScreen struct{ selectionScreen }
 
-func newDestinationFieldScreen(note anki.Note) *destinationFieldScreen {
+func newDestinationFieldScreen(note *anki.Note) *destinationFieldScreen {
 	return &destinationFieldScreen{
 		selectionScreen: newSelectionScreen(
 			"Select the destination field",
@@ -25,7 +25,7 @@ func newDestinationFieldScreen(note anki.Note) *destinationFieldScreen {
 func chooseDestinationField(
 	ctx context.Context,
 	client client,
-	note anki.Note,
+	note *anki.Note,
 	previous *destinationFieldScreen,
 	display display,
 ) (string, *destinationFieldScreen, error) {
