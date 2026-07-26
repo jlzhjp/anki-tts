@@ -183,6 +183,36 @@ func TestGenerateErrors(t *testing.T) {
 	})
 }
 
+func TestServiceRetryClassification(t *testing.T) {
+	t.Parallel()
+	service := &service{}
+	tests := []struct {
+		err  error
+		name string
+		want bool
+	}{
+		{name: "transport", err: errors.New("offline"), want: true},
+		{name: "attempt deadline", err: context.DeadlineExceeded, want: true},
+		{name: "attempt cancellation", err: context.Canceled},
+		{name: "permanent", err: permanent(errors.New("invalid request"))},
+		{name: "request timeout", err: &apiError{statusCode: http.StatusRequestTimeout}, want: true},
+		{name: "too early", err: &apiError{statusCode: http.StatusTooEarly}, want: true},
+		{name: "rate limited", err: &apiError{statusCode: http.StatusTooManyRequests}, want: true},
+		{name: "server error", err: &apiError{statusCode: http.StatusBadGateway}, want: true},
+		{name: "nonstandard status", err: &apiError{statusCode: 600}},
+		{name: "bad request", err: &apiError{statusCode: http.StatusBadRequest}},
+		{name: "unauthorized", err: &apiError{statusCode: http.StatusUnauthorized}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := service.ShouldRetry(test.err); got != test.want {
+				t.Fatalf("ShouldRetry()=%v want=%v", got, test.want)
+			}
+		})
+	}
+}
+
 func mustService(t *testing.T, client HTTPClient) ankitts.Service {
 	t.Helper()
 	service, err := NewFactory(WithHTTPClient(client)).Create(Config{Model: "model", APIKey: "secret"})

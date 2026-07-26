@@ -151,10 +151,112 @@ func TestRetryCanceledBeforeFirstAttemptReportsNothing(t *testing.T) {
 	}
 }
 
-func TestRetryValidationIsLazy(t *testing.T) {
+func TestRetryValidatesAtComposition(t *testing.T) {
 	t.Parallel()
 	identity := func(_ context.Context, value int) (int, error) { return value, nil }
 	if _, err := Retry(RetryConfig{}, "operation", identity); err == nil {
 		t.Fatal("expected invalid retry policy error")
+	}
+}
+
+func TestRetryPredicateStopsPermanentError(t *testing.T) {
+	t.Parallel()
+	failure := errors.New("permanent")
+	var calls int
+	transform, err := Retry(
+		retryConfig(3),
+		"operation",
+		func(_ context.Context, value int) (int, error) {
+			calls++
+			return value, failure
+		},
+		WithRetryPredicate(func(err error) bool {
+			return !errors.Is(err, failure)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []Event
+	ctx := context.WithValue(t.Context(), scopeContextKey{}, operationScope{
+		observer: ObserverFunc(func(event *Event) { events = append(events, *event) }),
+	})
+	if _, err := transform(ctx, 1); !errors.Is(err, failure) {
+		t.Fatalf("error=%v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls=%d", calls)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events=%+v", events)
+	}
+	if want := []EventKind{Started, Failed}; !slices.Equal(
+		[]EventKind{events[0].Kind, events[1].Kind},
+		want,
+	) {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestRetryRetriesAttemptLocalDeadline(t *testing.T) {
+	t.Parallel()
+	var calls int
+	transform, err := Retry(
+		retryConfig(2),
+		"operation",
+		func(_ context.Context, value int) (int, error) {
+			calls++
+			if calls == 1 {
+				return 0, context.DeadlineExceeded
+			}
+			return value, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := transform(t.Context(), 7)
+	if err != nil || value != 7 || calls != 2 {
+		t.Fatalf("value=%d calls=%d error=%v", value, calls, err)
+	}
+}
+
+func TestRetryParentCancellationTakesPrecedenceOverPredicate(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	var predicateCalls int
+	transform, err := Retry(
+		retryConfig(3),
+		"operation",
+		func(_ context.Context, value int) (int, error) {
+			cancel()
+			return value, errors.New("operation failed")
+		},
+		WithRetryPredicate(func(error) bool {
+			predicateCalls++
+			return true
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transform(ctx, 1); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v", err)
+	}
+	if predicateCalls != 0 {
+		t.Fatalf("predicate calls=%d", predicateCalls)
+	}
+}
+
+func TestRetryRejectsNilPredicate(t *testing.T) {
+	t.Parallel()
+	identity := func(_ context.Context, value int) (int, error) { return value, nil }
+	if _, err := Retry(
+		retryConfig(1),
+		"operation",
+		identity,
+		WithRetryPredicate(nil),
+	); err == nil {
+		t.Fatal("expected nil predicate error")
 	}
 }

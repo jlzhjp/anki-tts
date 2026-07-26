@@ -87,6 +87,11 @@ type storedItem struct {
 	item     generationItem
 }
 
+type batchAccumulator struct {
+	result    BatchResult
+	completed []bool
+}
+
 // Execute runs a prepared plan through its dynamically assembled component stages.
 func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOptions) (BatchResult, error) {
 	result := BatchResult{Items: make([]ItemResult, len(plan.jobs))}
@@ -102,7 +107,9 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		func(ctx context.Context, job preparedJob) (generationItem, error) {
 			audio, err := synthesize(ctx, job)
 			return generationItem{job: job, audio: audio}, err
-		})
+		},
+		pipeline.WithRetryPredicate(componentRetryPredicate(plan.jobs[0].service)),
+	)
 	if err != nil {
 		return result, err
 	}
@@ -123,7 +130,9 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 			func(ctx context.Context, item generationItem) (generationItem, error) {
 				audio, err := processAudio(ctx, processor.Transformer, &item.audio)
 				return generationItem{job: item.job, audio: audio}, err
-			})
+			},
+			pipeline.WithRetryPredicate(componentRetryPredicate(processor.Transformer)),
+		)
 		if retryErr != nil {
 			return result, retryErr
 		}
@@ -144,7 +153,9 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 			filename := audioFilename(&item)
 			storedFilename, err := a.anki.StoreMediaFile(ctx, filename, item.audio.data)
 			return storedItem{item: item, filename: storedFilename}, err
-		})
+		},
+		pipeline.WithRetryPredicate(componentRetryPredicate(a.anki)),
+	)
 	if err != nil {
 		return result, err
 	}
@@ -163,7 +174,9 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 				Filename: stored.filename,
 				Cost:     stored.item.audio.cost, CostErr: stored.item.audio.costErr,
 			}, nil
-		})
+		},
+		pipeline.WithRetryPredicate(componentRetryPredicate(a.anki)),
+	)
 	if err != nil {
 		return result, err
 	}
@@ -206,25 +219,38 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 			MaxAttempts: event.MaxAttempts, RetryAt: event.RetryAt, Err: event.Err,
 		})
 	})
-	outcomes, executionErr := pipeline.Collect(ctx, persisted, observer)
-	completed := make([]bool, len(plan.jobs))
-	for _, outcome := range outcomes {
-		job := plan.jobs[outcome.Index]
-		entry := ItemResult{Index: outcome.Index, NoteID: job.noteID, Stage: outcome.Stage, Result: outcome.Value}
-		if outcome.Err != nil {
-			entry.Err = &StageError{NoteID: job.noteID, Stage: outcome.Stage, Err: outcome.Err}
-		}
-		result.Items[outcome.Index] = entry
-		completed[outcome.Index] = true
+	accumulator := &batchAccumulator{
+		result: result, completed: make([]bool, len(plan.jobs)),
 	}
+	accumulator, executionErr := pipeline.Reduce(
+		ctx,
+		persisted,
+		observer,
+		accumulator,
+		func(accumulator *batchAccumulator, outcome pipeline.Result[GenerateResult]) *batchAccumulator {
+			job := plan.jobs[outcome.Index]
+			entry := ItemResult{
+				Index: outcome.Index, NoteID: job.noteID,
+				Stage: outcome.Stage, Result: outcome.Value,
+			}
+			if outcome.Err != nil {
+				entry.Err = &StageError{
+					NoteID: job.noteID, Stage: outcome.Stage, Err: outcome.Err,
+				}
+			}
+			accumulator.result.Items[outcome.Index] = entry
+			accumulator.completed[outcome.Index] = true
+			return accumulator
+		},
+	)
 	if executionErr != nil {
-		for index, done := range completed {
+		for index, done := range accumulator.completed {
 			if !done {
-				result.Items[index].Err = executionErr
+				accumulator.result.Items[index].Err = executionErr
 			}
 		}
 	}
-	return result, executionErr
+	return accumulator.result, executionErr
 }
 
 func synthesize(ctx context.Context, job preparedJob) (synthesizedAudio, error) {
@@ -236,7 +262,9 @@ func synthesize(ctx context.Context, job preparedJob) (synthesizedAudio, error) 
 		return synthesizedAudio{}, err
 	}
 	if voice == nil {
-		return synthesizedAudio{}, errors.New("TTS service returned no voice")
+		return synthesizedAudio{}, permanentOperationFailure(
+			errors.New("TTS service returned no voice"),
+		)
 	}
 	data, format, mediaType, err := readVoice(ctx, voice)
 	if err != nil {
@@ -258,7 +286,9 @@ func processAudio(ctx context.Context, transformer Transformer, source *synthesi
 	}
 	if transformed == nil {
 		_ = voice.Close()
-		return synthesizedAudio{}, errors.New("audio processor returned no voice")
+		return synthesizedAudio{}, permanentOperationFailure(
+			errors.New("audio processor returned no voice"),
+		)
 	}
 	data, format, mediaType, err := readVoice(ctx, transformed)
 	if err != nil {
@@ -276,7 +306,9 @@ func readVoice(ctx context.Context, voice Voice) (data []byte, format, mediaType
 	format = safeFormat(voice.Format())
 	if format == "" {
 		_ = voice.Close()
-		return nil, "", "", fmt.Errorf("audio pipeline returned invalid format %q", voice.Format())
+		return nil, "", "", permanentOperationFailure(
+			fmt.Errorf("audio pipeline returned invalid format %q", voice.Format()),
+		)
 	}
 	closeVoice := sync.OnceValue(voice.Close)
 	stopCancellationClose := context.AfterFunc(ctx, func() {
@@ -292,10 +324,14 @@ func readVoice(ctx context.Context, voice Voice) (data []byte, format, mediaType
 		return nil, "", "", fmt.Errorf("close audio: %w", closeErr)
 	}
 	if len(data) == 0 {
-		return nil, "", "", errors.New("audio pipeline returned empty data")
+		return nil, "", "", permanentOperationFailure(
+			errors.New("audio pipeline returned empty data"),
+		)
 	}
 	if len(data) > maxFinalAudioSize {
-		return nil, "", "", fmt.Errorf("audio exceeds %d bytes", maxFinalAudioSize)
+		return nil, "", "", permanentOperationFailure(
+			fmt.Errorf("audio exceeds %d bytes", maxFinalAudioSize),
+		)
 	}
 	return data, format, voice.MediaType(), nil
 }

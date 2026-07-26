@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestMapConcurrentChangesTypesAndPreservesInputOrder(t *testing.T) {
+func TestCollectRestoresOrderAfterConcurrentTypeChangingMaps(t *testing.T) {
 	t.Parallel()
 	var active atomic.Int32
 	var maximum atomic.Int32
@@ -131,7 +131,7 @@ func TestMapConcurrentWaitsForInFlightTransforms(t *testing.T) {
 	}
 }
 
-func TestMapConcurrentCompositionValidationIsLazy(t *testing.T) {
+func TestMapConcurrentValidationDoesNotStartUpstream(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
 	stream, err := MapConcurrent(FromSlice([]int{1}), "configured", 1,

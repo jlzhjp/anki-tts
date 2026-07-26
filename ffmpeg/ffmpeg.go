@@ -23,6 +23,15 @@ var (
 	errOutputClosed   = errors.New("output stream closed before completion")
 )
 
+type permanentTransformError struct{ err error }
+
+func (e *permanentTransformError) Error() string { return e.err.Error() }
+func (e *permanentTransformError) Unwrap() error { return e.err }
+
+func permanentTransformFailure(err error) error {
+	return &permanentTransformError{err: err}
+}
+
 // Config describes the optional FFmpeg output pipeline.
 type Config struct {
 	Format Format   `toml:"format"`
@@ -84,7 +93,9 @@ func NewWithRunner(config Config, runner CommandRunner, maxOutputSize int64) (*T
 // Transform starts FFmpeg and wraps the source voice with transformed audio.
 func (t *Transformer) Transform(ctx context.Context, voice ankitts.Voice) (ankitts.Voice, error) {
 	if voice == nil {
-		return nil, errors.New("transform audio with FFmpeg: input voice is required")
+		return nil, permanentTransformFailure(
+			errors.New("transform audio with FFmpeg: input voice is required"),
+		)
 	}
 	ankitts.ReportProgress(ctx, "Converting audio to "+strings.ToUpper(t.format.Extension())+" with FFmpeg")
 	args := make([]string, 0, 8+len(t.args))
@@ -206,20 +217,44 @@ func (s *outputStream) finalize(endErr error) error {
 func (r *outputStreamResult) resultError() error {
 	switch {
 	case errors.Is(r.outputErr, errOutputTooLarge):
-		return fmt.Errorf("transform audio with FFmpeg: %w (%d bytes)", r.outputErr, r.maxBytes)
+		return permanentTransformFailure(
+			fmt.Errorf("transform audio with FFmpeg: %w (%d bytes)", r.outputErr, r.maxBytes),
+		)
+	case errors.Is(r.outputErr, errOutputClosed):
+		return permanentTransformFailure(
+			fmt.Errorf("transform audio with FFmpeg: %w", r.outputErr),
+		)
 	case r.outputErr != nil:
 		return fmt.Errorf("transform audio with FFmpeg: %w", r.outputErr)
 	case r.contextErr != nil:
 		return fmt.Errorf("transform audio with FFmpeg: %w", r.contextErr)
 	case r.processErr != nil && r.diagnostic != "":
-		return fmt.Errorf("transform audio with FFmpeg: %w: %s", r.processErr, r.diagnostic)
+		return permanentTransformFailure(
+			fmt.Errorf("transform audio with FFmpeg: %w: %s", r.processErr, r.diagnostic),
+		)
 	case r.processErr != nil:
-		return fmt.Errorf("transform audio with FFmpeg: %w", r.processErr)
+		return permanentTransformFailure(
+			fmt.Errorf("transform audio with FFmpeg: %w", r.processErr),
+		)
 	case r.bytesRead == 0:
-		return errors.New("transform audio with FFmpeg: command produced empty output")
+		return permanentTransformFailure(
+			errors.New("transform audio with FFmpeg: command produced empty output"),
+		)
 	default:
 		return nil
 	}
 }
 
-var _ ankitts.Transformer = (*Transformer)(nil)
+// ShouldRetry classifies errors returned by Transform.
+func (*Transformer) ShouldRetry(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var permanentErr *permanentTransformError
+	return !errors.As(err, &permanentErr)
+}
+
+var (
+	_ ankitts.Transformer     = (*Transformer)(nil)
+	_ ankitts.RetryClassifier = (*Transformer)(nil)
+)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -238,6 +239,31 @@ func TestConfigurationValidation(t *testing.T) {
 			_, err := NewWithRunner(test.config, test.runner, 1024)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestTransformerRetryClassification(t *testing.T) {
+	t.Parallel()
+	transformer := &Transformer{}
+	tests := []struct {
+		err  error
+		name string
+		want bool
+	}{
+		{name: "process start", err: errors.New("resource unavailable"), want: true},
+		{name: "stream IO", err: fmt.Errorf("read stdout: %w", io.ErrUnexpectedEOF), want: true},
+		{name: "attempt deadline", err: context.DeadlineExceeded, want: true},
+		{name: "attempt cancellation", err: context.Canceled},
+		{name: "nonzero exit", err: permanentTransformFailure(errors.New("exit status 1"))},
+		{name: "oversized", err: permanentTransformFailure(errOutputTooLarge)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := transformer.ShouldRetry(test.err); got != test.want {
+				t.Fatalf("ShouldRetry()=%v want=%v", got, test.want)
 			}
 		})
 	}

@@ -104,6 +104,26 @@ type response[T any] struct {
 	Error  *string `json:"error"`
 }
 
+type httpError struct {
+	message    string
+	statusCode int
+}
+
+func (e *httpError) Error() string { return e.message }
+
+type apiError struct{ message string }
+
+func (e *apiError) Error() string { return e.message }
+
+type permanentError struct{ err error }
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
+
+func permanent(err error) error {
+	return &permanentError{err: err}
+}
+
 // ListDecks returns all deck names in the current Anki collection.
 func (c *Client) ListDecks(ctx context.Context) ([]string, error) {
 	var decks []string
@@ -165,10 +185,10 @@ func (c *Client) NotesInfo(ctx context.Context, ids []int64) ([]Note, error) {
 // UpdateNote updates the supplied fields of one note.
 func (c *Client) UpdateNote(ctx context.Context, update NoteUpdate) error {
 	if update.ID <= 0 {
-		return errors.New("update note: note ID must be positive")
+		return permanent(errors.New("update note: note ID must be positive"))
 	}
 	if len(update.Fields) == 0 {
-		return errors.New("update note: at least one field is required")
+		return permanent(errors.New("update note: at least one field is required"))
 	}
 
 	params := struct {
@@ -203,18 +223,18 @@ func (c *Client) UpdateNotes(ctx context.Context, updates []NoteUpdate) error {
 // request body instead of allocating a second encoded copy of data.
 func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byte) (string, error) {
 	if strings.TrimSpace(filename) == "" {
-		return "", errors.New("store media file: filename is required")
+		return "", permanent(errors.New("store media file: filename is required"))
 	}
 	if filepath.Base(filename) != filename || strings.ContainsAny(filename, `/\`) {
-		return "", errors.New("store media file: filename must not contain path separators")
+		return "", permanent(errors.New("store media file: filename must not contain path separators"))
 	}
 	if len(data) == 0 {
-		return "", errors.New("store media file: data is required")
+		return "", permanent(errors.New("store media file: data is required"))
 	}
 
 	encodedFilename, err := json.Marshal(filename)
 	if err != nil {
-		return "", fmt.Errorf("store media file %q: encode filename: %w", filename, err)
+		return "", permanent(fmt.Errorf("store media file %q: encode filename: %w", filename, err))
 	}
 	prefix := fmt.Appendf(nil, `{"action":"storeMediaFile","version":%d,"params":{"filename":%s,"data":"`, apiVersion, encodedFilename)
 	suffix := []byte(`"}}`)
@@ -242,7 +262,7 @@ func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byt
 	if err != nil {
 		_ = reader.CloseWithError(err)
 		<-writeResult
-		return "", fmt.Errorf("store media file %q: create request: %w", filename, err)
+		return "", permanent(fmt.Errorf("store media file %q: create request: %w", filename, err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.ContentLength = contentLength
@@ -251,14 +271,19 @@ func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byt
 		_ = reader.CloseWithError(requestErr)
 	}
 	streamErr := <-writeResult
+	if requestErr != nil {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		return "", fmt.Errorf("store media file %q: send request: %w", filename, requestErr)
+	}
 	if streamErr != nil {
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
-		return "", fmt.Errorf("store media file %q: encode request: %w", filename, streamErr)
-	}
-	if requestErr != nil {
-		return "", fmt.Errorf("store media file %q: send request: %w", filename, requestErr)
+		return "", permanent(
+			fmt.Errorf("store media file %q: encode request: %w", filename, streamErr),
+		)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -267,17 +292,31 @@ func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byt
 		return "", fmt.Errorf("store media file %q: read response: %w", filename, err)
 	}
 	if len(responseBody) > maxResponseSize {
-		return "", fmt.Errorf("store media file %q: response exceeds %d bytes", filename, maxResponseSize)
+		return "", permanent(
+			fmt.Errorf("store media file %q: response exceeds %d bytes", filename, maxResponseSize),
+		)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("store media file %q: unexpected HTTP status %s: %s", filename, resp.Status, strings.TrimSpace(string(responseBody)))
+		return "", &httpError{
+			statusCode: resp.StatusCode,
+			message: fmt.Sprintf(
+				"store media file %q: unexpected HTTP status %s: %s",
+				filename,
+				resp.Status,
+				strings.TrimSpace(string(responseBody)),
+			),
+		}
 	}
 	var wrapper response[string]
 	if err := json.Unmarshal(responseBody, &wrapper); err != nil {
-		return "", fmt.Errorf("store media file %q: decode response: %w", filename, err)
+		return "", permanent(
+			fmt.Errorf("store media file %q: decode response: %w", filename, err),
+		)
 	}
 	if wrapper.Error != nil {
-		return "", fmt.Errorf("store media file %q: %s", filename, *wrapper.Error)
+		return "", &apiError{
+			message: fmt.Sprintf("store media file %q: %s", filename, *wrapper.Error),
+		}
 	}
 	if wrapper.Result == "" {
 		wrapper.Result = filename
@@ -288,12 +327,12 @@ func (c *Client) StoreMediaFile(ctx context.Context, filename string, data []byt
 func (c *Client) invoke(ctx context.Context, action string, params, result any) error {
 	body, err := json.Marshal(request{Action: action, Version: apiVersion, Params: params})
 	if err != nil {
-		return fmt.Errorf("encode request: %w", err)
+		return permanent(fmt.Errorf("encode request: %w", err))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return permanent(fmt.Errorf("create request: %w", err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -309,24 +348,59 @@ func (c *Client) invoke(ctx context.Context, action string, params, result any) 
 		return fmt.Errorf("read response: %w", err)
 	}
 	if len(responseBody) > maxResponseSize {
-		return fmt.Errorf("response exceeds %d bytes", maxResponseSize)
+		return permanent(fmt.Errorf("response exceeds %d bytes", maxResponseSize))
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("unexpected HTTP status %s: %s", resp.Status, strings.TrimSpace(string(responseBody)))
+		return &httpError{
+			statusCode: resp.StatusCode,
+			message: fmt.Sprintf(
+				"unexpected HTTP status %s: %s",
+				resp.Status,
+				strings.TrimSpace(string(responseBody)),
+			),
+		}
 	}
 
 	wrapper := response[json.RawMessage]{}
 	if err := json.Unmarshal(responseBody, &wrapper); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return permanent(fmt.Errorf("decode response: %w", err))
 	}
 	if wrapper.Error != nil {
-		return errors.New(*wrapper.Error)
+		return &apiError{message: *wrapper.Error}
 	}
 	if result == nil {
 		return nil
 	}
 	if err := json.Unmarshal(wrapper.Result, result); err != nil {
-		return fmt.Errorf("decode result: %w", err)
+		return permanent(fmt.Errorf("decode result: %w", err))
 	}
 	return nil
+}
+
+// ShouldRetry classifies errors returned by Anki operations.
+func (*Client) ShouldRetry(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var permanentErr *permanentError
+	if errors.As(err, &permanentErr) {
+		return false
+	}
+	var apiErr *apiError
+	if errors.As(err, &apiErr) {
+		return false
+	}
+	var httpErr *httpError
+	if errors.As(err, &httpErr) {
+		return retryableHTTPStatus(httpErr.statusCode)
+	}
+	return true
+}
+
+func retryableHTTPStatus(status int) bool {
+	return status == http.StatusRequestTimeout ||
+		status == http.StatusTooEarly ||
+		status == http.StatusTooManyRequests ||
+		status >= http.StatusInternalServerError &&
+			status < 600
 }

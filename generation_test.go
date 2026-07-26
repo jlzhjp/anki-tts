@@ -256,6 +256,49 @@ func TestAnkiUpdateRetryDoesNotRepeatStoredMedia(t *testing.T) {
 	}
 }
 
+func TestExecuteHonorsComponentRetryClassifiers(t *testing.T) {
+	t.Parallel()
+	t.Run("service", func(t *testing.T) {
+		t.Parallel()
+		provider := &classifiedTTS{err: errors.New("invalid request")}
+		app := newClassifiedTestApplication(t, &fakeAnki{}, provider, nil)
+		_, err := executeOne(t.Context(), app, spec())
+		if err == nil || provider.calls != 1 {
+			t.Fatalf("calls=%d error=%v", provider.calls, err)
+		}
+	})
+	t.Run("transformer", func(t *testing.T) {
+		t.Parallel()
+		transformer := &classifiedTransformer{err: errors.New("invalid audio")}
+		app := newClassifiedTestApplication(
+			t,
+			&fakeAnki{},
+			&fakeTTS{voice: voice("audio", "wav")},
+			transformer,
+		)
+		_, err := executeOne(t.Context(), app, spec())
+		if err == nil || transformer.calls != 1 {
+			t.Fatalf("calls=%d error=%v", transformer.calls, err)
+		}
+	})
+	t.Run("Anki", func(t *testing.T) {
+		t.Parallel()
+		client := &classifiedAnki{
+			fakeAnki: &fakeAnki{updateErr: errors.New("invalid note")},
+		}
+		app := newClassifiedTestApplication(
+			t,
+			client,
+			&fakeTTS{voice: voice("audio", "mp3")},
+			nil,
+		)
+		_, err := executeOne(t.Context(), app, spec())
+		if err == nil || client.updateCalls != 1 {
+			t.Fatalf("calls=%d error=%v", client.updateCalls, err)
+		}
+	})
+}
+
 func TestCancellationAfterUploadCompletesNoteUpdate(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -382,6 +425,29 @@ func newTestApplication(t *testing.T, client AnkiClient, service Service, transf
 	return app
 }
 
+func newClassifiedTestApplication(
+	t *testing.T,
+	client AnkiClient,
+	service Service,
+	transformer Transformer,
+) *Application {
+	t.Helper()
+	config := testPipelineConfig(transformer != nil)
+	for name, stage := range config {
+		stage.Retry.MaxAttempts = 3
+		config[name] = stage
+	}
+	processors := []AudioProcessor(nil)
+	if transformer != nil {
+		processors = []AudioProcessor{{Name: "ffmpeg", Transformer: transformer}}
+	}
+	app, err := New(client, container(t, service), processors, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
+}
+
 func testPipelineConfig(withFFmpeg bool) pipeline.Config {
 	stage := func() pipeline.StageConfig {
 		return pipeline.StageConfig{
@@ -440,6 +506,18 @@ type fakeTTS struct {
 	description string
 }
 
+type classifiedTTS struct {
+	err   error
+	calls int
+}
+
+func (s *classifiedTTS) Generate(context.Context, Input) (Voice, error) {
+	s.calls++
+	return nil, s.err
+}
+
+func (*classifiedTTS) ShouldRetry(error) bool { return false }
+
 type cancelingTTS struct {
 	cancel context.CancelFunc
 }
@@ -462,6 +540,19 @@ type fakeTransformer struct {
 	streamErr   error
 	description string
 }
+
+type classifiedTransformer struct {
+	err   error
+	calls int
+}
+
+func (t *classifiedTransformer) Transform(_ context.Context, input Voice) (Voice, error) {
+	t.calls++
+	_ = input.Close()
+	return nil, t.err
+}
+
+func (*classifiedTransformer) ShouldRetry(error) bool { return false }
 
 type appendTransformer struct{ suffix string }
 
@@ -490,6 +581,10 @@ func (f *fakeTransformer) Transform(ctx context.Context, input Voice) (Voice, er
 	}
 	return &fakeVoice{ReadCloser: output, format: f.format, source: input}, nil
 }
+
+type classifiedAnki struct{ *fakeAnki }
+
+func (*classifiedAnki) ShouldRetry(error) bool { return false }
 
 type errorReader struct{ err error }
 

@@ -2,6 +2,7 @@ package anki
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -200,6 +201,37 @@ func TestAnkiConnectError(t *testing.T) {
 	_, err := client.ListDecks(t.Context())
 	if err == nil || err.Error() != "list decks: collection unavailable" {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestClientRetryClassification(t *testing.T) {
+	t.Parallel()
+	client := NewClient()
+	tests := []struct {
+		err  error
+		name string
+		want bool
+	}{
+		{name: "transport", err: errors.New("offline"), want: true},
+		{name: "attempt deadline", err: context.DeadlineExceeded, want: true},
+		{name: "attempt cancellation", err: context.Canceled},
+		{name: "permanent", err: permanent(errors.New("invalid request"))},
+		{name: "API error", err: &apiError{message: "invalid note"}},
+		{name: "request timeout", err: &httpError{statusCode: http.StatusRequestTimeout}, want: true},
+		{name: "too early", err: &httpError{statusCode: http.StatusTooEarly}, want: true},
+		{name: "rate limited", err: &httpError{statusCode: http.StatusTooManyRequests}, want: true},
+		{name: "server error", err: &httpError{statusCode: http.StatusServiceUnavailable}, want: true},
+		{name: "nonstandard status", err: &httpError{statusCode: 600}},
+		{name: "bad request", err: &httpError{statusCode: http.StatusBadRequest}},
+		{name: "not found", err: &httpError{statusCode: http.StatusNotFound}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := client.ShouldRetry(test.err); got != test.want {
+				t.Fatalf("ShouldRetry()=%v want=%v", got, test.want)
+			}
+		})
 	}
 }
 

@@ -33,6 +33,22 @@ type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
+type apiError struct {
+	message    string
+	statusCode int
+}
+
+func (e *apiError) Error() string { return e.message }
+
+type permanentError struct{ err error }
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
+
+func permanent(err error) error {
+	return &permanentError{err: err}
+}
+
 // Factory creates OpenRouter text-to-speech services.
 type Factory struct {
 	httpClient     HTTPClient
@@ -159,7 +175,7 @@ type speechRequest struct {
 // Generate synthesizes input text through OpenRouter.
 func (s *service) Generate(ctx context.Context, input ankitts.Input) (ankitts.Voice, error) {
 	if strings.TrimSpace(input.Text) == "" {
-		return nil, errors.New("generate OpenRouter speech: input text is required")
+		return nil, permanent(errors.New("generate OpenRouter speech: input text is required"))
 	}
 	ankitts.ReportProgress(ctx, "Generating speech with "+s.model)
 
@@ -170,12 +186,12 @@ func (s *service) Generate(ctx context.Context, input ankitts.Input) (ankitts.Vo
 		ResponseFormat: s.format,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("generate OpenRouter speech: encode request: %w", err)
+		return nil, permanent(fmt.Errorf("generate OpenRouter speech: encode request: %w", err))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("generate OpenRouter speech: create request: %w", err)
+		return nil, permanent(fmt.Errorf("generate OpenRouter speech: create request: %w", err))
 	}
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -190,7 +206,9 @@ func (s *service) Generate(ctx context.Context, input ankitts.Input) (ankitts.Vo
 	}
 	if resp.ContentLength > maxAudioSize {
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("generate OpenRouter speech: response exceeds %d bytes", maxAudioSize)
+		return nil, permanent(
+			fmt.Errorf("generate OpenRouter speech: response exceeds %d bytes", maxAudioSize),
+		)
 	}
 
 	mediaType := resp.Header.Get("Content-Type")
@@ -221,7 +239,9 @@ type voiceResult struct {
 func (v *voiceResult) Read(p []byte) (int, error) {
 	n, err := v.stream.Read(p)
 	if errors.Is(err, streamutil.ErrLimitExceeded) {
-		return 0, fmt.Errorf("generate OpenRouter speech: response exceeds %d bytes", v.stream.Limit())
+		return 0, permanent(
+			fmt.Errorf("generate OpenRouter speech: response exceeds %d bytes", v.stream.Limit()),
+		)
 	}
 	return n, err
 }
@@ -242,6 +262,7 @@ func openRouterError(resp *http.Response, apiKey string) error {
 // message when available, and redacts the API key before returning it.
 // For example: "generate OpenRouter speech: HTTP 401 Unauthorized: invalid API key".
 func openRouterAPIError(operation string, resp *http.Response, apiKey string) error {
+	message := fmt.Sprintf("%s: HTTP %s", operation, resp.Status)
 	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodySize))
 	if readErr == nil {
 		var envelope struct {
@@ -250,11 +271,34 @@ func openRouterAPIError(operation string, resp *http.Response, apiKey string) er
 			} `json:"error"`
 		}
 		if json.Unmarshal(body, &envelope) == nil && strings.TrimSpace(envelope.Error.Message) != "" {
-			message := strings.ReplaceAll(envelope.Error.Message, apiKey, "[REDACTED]")
-			return fmt.Errorf("%s: HTTP %s: %s", operation, resp.Status, message)
+			detail := strings.ReplaceAll(envelope.Error.Message, apiKey, "[REDACTED]")
+			message += ": " + detail
 		}
 	}
-	return fmt.Errorf("%s: HTTP %s", operation, resp.Status)
+	return &apiError{message: message, statusCode: resp.StatusCode}
+}
+
+func (*service) ShouldRetry(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var permanentErr *permanentError
+	if errors.As(err, &permanentErr) {
+		return false
+	}
+	var apiErr *apiError
+	if errors.As(err, &apiErr) {
+		return retryableHTTPStatus(apiErr.statusCode)
+	}
+	return true
+}
+
+func retryableHTTPStatus(status int) bool {
+	return status == http.StatusRequestTimeout ||
+		status == http.StatusTooEarly ||
+		status == http.StatusTooManyRequests ||
+		status >= http.StatusInternalServerError &&
+			status < 600
 }
 
 func mediaTypeForFormat(format string) string {
@@ -264,4 +308,7 @@ func mediaTypeForFormat(format string) string {
 	return "audio/mpeg"
 }
 
-var _ ankitts.Service = (*service)(nil)
+var (
+	_ ankitts.Service         = (*service)(nil)
+	_ ankitts.RetryClassifier = (*service)(nil)
+)
