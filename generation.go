@@ -6,13 +6,14 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
+	"math"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
 	"jlzhjp.dev/ankitts/anki"
+	"jlzhjp.dev/ankitts/internal/streamutil"
 	"jlzhjp.dev/ankitts/pipeline"
 )
 
@@ -28,6 +29,7 @@ type ExecuteOptions struct {
 // GenerateResult describes a successfully stored voice.
 type GenerateResult struct {
 	CostErr  error
+	cost     CostLoader
 	Cost     *float64
 	Filename string
 }
@@ -41,8 +43,18 @@ type ItemResult struct {
 	NoteID int64
 }
 
+// CostSummary describes the cost information loaded for persisted items.
+type CostSummary struct {
+	KnownTotal       float64
+	KnownItems       int
+	UnavailableItems int
+}
+
 // BatchResult contains exactly one item per planned note in plan order.
-type BatchResult struct{ Items []ItemResult }
+type BatchResult struct {
+	Items []ItemResult
+	Cost  CostSummary
+}
 
 // PartialPersistenceError reports media stored before a note update failed.
 type PartialPersistenceError struct {
@@ -69,16 +81,15 @@ func (e *StageError) Error() string {
 
 func (e *StageError) Unwrap() error { return e.Err }
 
-type synthesizedAudio struct {
-	costErr   error
-	cost      *float64
+type materializedVoice struct {
+	buffer    *streamutil.ReplayBuffer
+	loadCost  CostLoader
 	format    string
 	mediaType string
-	data      []byte
 }
 
 type generationItem struct {
-	audio synthesizedAudio
+	audio materializedVoice
 	job   preparedJob
 }
 
@@ -88,8 +99,18 @@ type storedItem struct {
 }
 
 type batchAccumulator struct {
-	result    BatchResult
 	completed []bool
+	result    BatchResult
+}
+
+type costTask struct {
+	load      CostLoader
+	itemIndex int
+}
+
+type costObservation struct {
+	err  error
+	cost float64
 }
 
 // Execute runs a prepared plan through its dynamically assembled component stages.
@@ -151,7 +172,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 		func(ctx context.Context, item generationItem) (storedItem, error) {
 			ReportProgress(ctx, "Storing media in Anki")
 			filename := audioFilename(&item)
-			storedFilename, err := a.anki.StoreMediaFile(ctx, filename, item.audio.data)
+			storedFilename, err := a.anki.StoreMediaFile(ctx, filename, item.audio.buffer.Bytes())
 			return storedItem{item: item, filename: storedFilename}, err
 		},
 		pipeline.WithRetryPredicate(componentRetryPredicate(a.anki)),
@@ -172,7 +193,7 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 			}
 			return GenerateResult{
 				Filename: stored.filename,
-				Cost:     stored.item.audio.cost, CostErr: stored.item.audio.costErr,
+				cost:     stored.item.audio.loadCost,
 			}, nil
 		},
 		pipeline.WithRetryPredicate(componentRetryPredicate(a.anki)),
@@ -250,114 +271,199 @@ func (a *Application) Execute(ctx context.Context, plan Plan, options ExecuteOpt
 			}
 		}
 	}
-	return accumulator.result, executionErr
+	costErr := loadBatchCosts(
+		ctx,
+		&accumulator.result,
+		serviceConfig.Concurrency,
+	)
+	if executionErr != nil {
+		return accumulator.result, executionErr
+	}
+	return accumulator.result, costErr
 }
 
-func synthesize(ctx context.Context, job preparedJob) (synthesizedAudio, error) {
+func synthesize(ctx context.Context, job preparedJob) (materializedVoice, error) {
 	voice, err := job.service.Generate(ctx, Input{Text: job.text})
 	if err != nil {
 		if voice != nil {
 			_ = voice.Close()
 		}
-		return synthesizedAudio{}, err
+		return materializedVoice{}, err
 	}
 	if voice == nil {
-		return synthesizedAudio{}, permanentOperationFailure(
+		return materializedVoice{}, permanentOperationFailure(
 			errors.New("TTS service returned no voice"),
 		)
 	}
-	data, format, mediaType, err := readVoice(ctx, voice)
-	if err != nil {
-		return synthesizedAudio{}, err
-	}
-	var cost *float64
-	costValue, costErr := voice.LoadCost(ctx)
-	if costErr == nil {
-		cost = &costValue
-	}
-	return synthesizedAudio{data: data, format: format, mediaType: mediaType, cost: cost, costErr: costErr}, nil
+	return materializeVoice(ctx, voice)
 }
 
-func processAudio(ctx context.Context, transformer Transformer, source *synthesizedAudio) (synthesizedAudio, error) {
-	voice := Voice(&bufferedVoice{Reader: bytes.NewReader(source.data), format: source.format, mediaType: source.mediaType, cost: source.cost, costErr: source.costErr})
+func processAudio(ctx context.Context, transformer Transformer, source *materializedVoice) (materializedVoice, error) {
+	voice := source.Open()
 	transformed, err := transformer.Transform(ctx, voice)
 	if err != nil {
-		return synthesizedAudio{}, err
+		return materializedVoice{}, err
 	}
 	if transformed == nil {
 		_ = voice.Close()
-		return synthesizedAudio{}, permanentOperationFailure(
+		return materializedVoice{}, permanentOperationFailure(
 			errors.New("audio processor returned no voice"),
 		)
 	}
-	data, format, mediaType, err := readVoice(ctx, transformed)
-	if err != nil {
-		return synthesizedAudio{}, err
-	}
-	return synthesizedAudio{data: data, format: format, mediaType: mediaType, cost: source.cost, costErr: source.costErr}, nil
+	return materializeVoice(ctx, transformed)
 }
 
 func audioFilename(item *generationItem) string {
-	hash := sha256.Sum256(item.audio.data)
+	hash := sha256.Sum256(item.audio.buffer.Bytes())
 	return fmt.Sprintf("anki-tts-%d-%x.%s", item.job.noteID, hash[:6], item.audio.format)
 }
 
-func readVoice(ctx context.Context, voice Voice) (data []byte, format, mediaType string, err error) {
-	format = safeFormat(voice.Format())
+func materializeVoice(ctx context.Context, voice Voice) (materializedVoice, error) {
+	rawFormat := voice.Format()
+	format := normalizeAudioExtension(rawFormat)
 	if format == "" {
 		_ = voice.Close()
-		return nil, "", "", permanentOperationFailure(
-			fmt.Errorf("audio pipeline returned invalid format %q", voice.Format()),
+		return materializedVoice{}, permanentOperationFailure(
+			fmt.Errorf("audio pipeline returned invalid format %q", rawFormat),
 		)
 	}
+	mediaType := voice.MediaType()
+	loadCost := voice.CostLoader()
 	closeVoice := sync.OnceValue(voice.Close)
 	stopCancellationClose := context.AfterFunc(ctx, func() {
 		_ = closeVoice()
 	})
-	data, readErr := io.ReadAll(io.LimitReader(voice, maxFinalAudioSize+1))
+	buffer, readErr := streamutil.NewReplayBuffer(voice, maxFinalAudioSize)
 	stopCancellationClose()
 	closeErr := closeVoice()
 	if readErr != nil {
-		return nil, "", "", fmt.Errorf("read audio: %w", readErr)
+		if errors.Is(readErr, streamutil.ErrLimitExceeded) {
+			return materializedVoice{}, permanentOperationFailure(
+				fmt.Errorf("audio exceeds %d bytes", maxFinalAudioSize),
+			)
+		}
+		return materializedVoice{}, fmt.Errorf("read audio: %w", readErr)
 	}
 	if closeErr != nil {
-		return nil, "", "", fmt.Errorf("close audio: %w", closeErr)
+		return materializedVoice{}, fmt.Errorf("close audio: %w", closeErr)
 	}
-	if len(data) == 0 {
-		return nil, "", "", permanentOperationFailure(
+	if len(buffer.Bytes()) == 0 {
+		return materializedVoice{}, permanentOperationFailure(
 			errors.New("audio pipeline returned empty data"),
 		)
 	}
-	if len(data) > maxFinalAudioSize {
-		return nil, "", "", permanentOperationFailure(
-			fmt.Errorf("audio exceeds %d bytes", maxFinalAudioSize),
-		)
-	}
-	return data, format, voice.MediaType(), nil
+	return materializedVoice{
+		buffer: buffer, format: format, mediaType: mediaType, loadCost: loadCost,
+	}, nil
 }
 
-type bufferedVoice struct {
-	costErr error
+func (v *materializedVoice) Open() Voice {
+	return &materializedVoiceReader{Reader: v.buffer.Reader(), source: v}
+}
+
+type materializedVoiceReader struct {
 	*bytes.Reader
-	cost      *float64
-	format    string
-	mediaType string
+	source *materializedVoice
 }
 
-func (*bufferedVoice) Close() error        { return nil }
-func (v *bufferedVoice) Format() string    { return v.format }
-func (v *bufferedVoice) MediaType() string { return v.mediaType }
-func (v *bufferedVoice) LoadCost(context.Context) (float64, error) {
-	if v.costErr != nil {
-		return 0, v.costErr
-	}
-	if v.cost == nil {
-		return 0, nil
-	}
-	return *v.cost, nil
+func (*materializedVoiceReader) Close() error        { return nil }
+func (v *materializedVoiceReader) Format() string    { return v.source.format }
+func (v *materializedVoiceReader) MediaType() string { return v.source.mediaType }
+func (v *materializedVoiceReader) CostLoader() CostLoader {
+	return v.source.loadCost
 }
 
-func safeFormat(format string) string {
+func loadBatchCosts(ctx context.Context, result *BatchResult, concurrency int) error {
+	tasks := make([]costTask, 0, len(result.Items))
+	for index := range result.Items {
+		item := &result.Items[index]
+		if item.Err == nil && item.Result.Filename != "" {
+			tasks = append(tasks, costTask{itemIndex: index, load: item.Result.cost})
+			item.Result.cost = nil
+		}
+	}
+	if len(tasks) == 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		for _, task := range tasks {
+			result.Items[task.itemIndex].Result.CostErr = err
+		}
+		summarizeCosts(result)
+		return err
+	}
+
+	costs, err := pipeline.MapConcurrent(
+		pipeline.FromSlice(tasks),
+		"cost",
+		concurrency,
+		func(ctx context.Context, task costTask) (costObservation, error) {
+			if task.load == nil {
+				return costObservation{err: ErrCostUnavailable}, nil
+			}
+			cost, loadErr := task.load(ctx)
+			if loadErr == nil && (cost < 0 || math.IsNaN(cost) || math.IsInf(cost, 0)) {
+				loadErr = fmt.Errorf("invalid voice cost %v", cost)
+			}
+			return costObservation{cost: cost, err: loadErr}, nil
+		},
+	)
+	if err != nil {
+		return err
+	}
+	completed := make([]bool, len(tasks))
+	completed, executionErr := pipeline.Reduce(
+		ctx,
+		costs,
+		nil,
+		completed,
+		func(completed []bool, outcome pipeline.Result[costObservation]) []bool {
+			task := tasks[outcome.Index]
+			item := &result.Items[task.itemIndex]
+			switch {
+			case outcome.Err != nil:
+				item.Result.CostErr = outcome.Err
+			case outcome.Value.err != nil:
+				item.Result.CostErr = outcome.Value.err
+			default:
+				cost := outcome.Value.cost
+				item.Result.Cost = &cost
+			}
+			completed[outcome.Index] = true
+			return completed
+		},
+	)
+	if executionErr != nil {
+		for index, done := range completed {
+			if !done {
+				result.Items[tasks[index].itemIndex].Result.CostErr = executionErr
+			}
+		}
+	}
+	summarizeCosts(result)
+	return executionErr
+}
+
+func summarizeCosts(result *BatchResult) {
+	result.Cost = CostSummary{}
+	for _, item := range result.Items {
+		if item.Err != nil || item.Result.Filename == "" {
+			continue
+		}
+		if item.Result.Cost != nil {
+			result.Cost.KnownTotal += *item.Result.Cost
+			result.Cost.KnownItems++
+		} else {
+			result.Cost.UnavailableItems++
+		}
+	}
+}
+
+// normalizeAudioExtension validates provider-supplied format metadata before
+// using it in an Anki media filename. The core remains provider-neutral by
+// accepting any alphanumeric extension while rejecting path separators and
+// punctuation.
+func normalizeAudioExtension(format string) string {
 	format = strings.ToLower(strings.TrimSpace(format))
 	if format == "" {
 		return ""

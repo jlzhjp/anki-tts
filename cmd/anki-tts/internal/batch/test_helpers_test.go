@@ -92,6 +92,8 @@ func (fakeTTS) Generate(context.Context, ankitts.Input) (ankitts.Voice, error) {
 
 type fakeVoice struct{ io.ReadCloser }
 
-func (*fakeVoice) Format() string                            { return "mp3" }
-func (*fakeVoice) MediaType() string                         { return "audio/mpeg" }
-func (*fakeVoice) LoadCost(context.Context) (float64, error) { return 0, nil }
+func (*fakeVoice) Format() string    { return "mp3" }
+func (*fakeVoice) MediaType() string { return "audio/mpeg" }
+func (*fakeVoice) CostLoader() ankitts.CostLoader {
+	return func(context.Context) (float64, error) { return 0, nil }
+}

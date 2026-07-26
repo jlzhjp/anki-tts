@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -133,6 +135,32 @@ func TestMultipleAudioProcessorsRunInRegistrationOrder(t *testing.T) {
 	}
 }
 
+func TestProcessorRetryReplaysCompleteAudio(t *testing.T) {
+	t.Parallel()
+	client := &fakeAnki{}
+	provider := &fakeTTS{voice: voice("provider audio", "wav")}
+	transformer := &retryingTransformer{}
+	config := testPipelineConfig(true)
+	stage := config["ffmpeg"]
+	stage.Retry.MaxAttempts = 2
+	config["ffmpeg"] = stage
+	app, err := New(
+		client,
+		container(t, provider),
+		[]AudioProcessor{{Name: "ffmpeg", Transformer: transformer}},
+		config,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executeOne(t.Context(), app, spec()); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(transformer.inputs) != "[provider audio provider audio]" {
+		t.Fatalf("inputs=%q", transformer.inputs)
+	}
+}
+
 func TestFailuresBeforeUploadLeaveAnkiUnchanged(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -178,6 +206,194 @@ func TestCostFailureIsNonFatal(t *testing.T) {
 	if result.Cost != nil || result.CostErr == nil || client.updateCalls != 1 {
 		t.Fatalf("result=%+v updates=%d", result, client.updateCalls)
 	}
+}
+
+func TestCostLoadsAfterPersistence(t *testing.T) {
+	t.Parallel()
+	client := &fakeAnki{}
+	var calls int
+	provider := &fakeTTS{voice: &fakeVoice{
+		ReadCloser: io.NopCloser(strings.NewReader("audio")),
+		format:     "mp3",
+		loadCost: func(context.Context) (float64, error) {
+			calls++
+			if client.updateCalls != 1 {
+				return 0, errors.New("cost loaded before persistence")
+			}
+			return 0.25, nil
+		},
+	}}
+	result, err := executeOne(t.Context(), newTestApplication(t, client, provider, nil), spec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || result.Cost == nil || *result.Cost != 0.25 {
+		t.Fatalf("calls=%d result=%+v", calls, result)
+	}
+}
+
+func TestTransformationComposesCost(t *testing.T) {
+	t.Parallel()
+	client := &fakeAnki{}
+	provider := &fakeTTS{voice: voice("audio", "wav")}
+	transformer := costAddingTransformer{cost: 0.75}
+	result, err := executeOne(
+		t.Context(),
+		newTestApplication(t, client, provider, transformer),
+		spec(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Cost == nil || *result.Cost != 0.75125 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestPersistenceFailureSkipsCost(t *testing.T) {
+	t.Parallel()
+	var calls int
+	provider := &fakeTTS{voice: &fakeVoice{
+		ReadCloser: io.NopCloser(strings.NewReader("audio")),
+		format:     "mp3",
+		loadCost: func(context.Context) (float64, error) {
+			calls++
+			return 1, nil
+		},
+	}}
+	client := &fakeAnki{updateErr: errors.New("update failed")}
+	_, err := executeOne(t.Context(), newTestApplication(t, client, provider, nil), spec())
+	if err == nil {
+		t.Fatal("expected persistence error")
+	}
+	if calls != 0 {
+		t.Fatalf("cost loader calls=%d", calls)
+	}
+}
+
+func TestLoadBatchCostsSummarizesPartialResults(t *testing.T) {
+	t.Parallel()
+	unavailable := errors.New("unavailable")
+	result := BatchResult{Items: []ItemResult{
+		successfulCostItem(func(context.Context) (float64, error) { return 0.25, nil }),
+		successfulCostItem(func(context.Context) (float64, error) { return 0, unavailable }),
+		successfulCostItem(nil),
+		{Err: errors.New("persistence failed")},
+	}}
+	if err := loadBatchCosts(t.Context(), &result, 2); err != nil {
+		t.Fatal(err)
+	}
+	if result.Cost.KnownTotal != 0.25 ||
+		result.Cost.KnownItems != 1 ||
+		result.Cost.UnavailableItems != 2 {
+		t.Fatalf("summary=%+v", result.Cost)
+	}
+	if result.Items[0].Result.Cost == nil ||
+		!errors.Is(result.Items[1].Result.CostErr, unavailable) ||
+		!errors.Is(result.Items[2].Result.CostErr, ErrCostUnavailable) {
+		t.Fatalf("items=%+v", result.Items)
+	}
+	if result.Items[3].Result.CostErr != nil {
+		t.Fatalf("failed persistence has cost error: %v", result.Items[3].Result.CostErr)
+	}
+}
+
+func TestLoadBatchCostsRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+	for _, cost := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		result := BatchResult{Items: []ItemResult{
+			successfulCostItem(func(context.Context) (float64, error) { return cost, nil }),
+		}}
+		if err := loadBatchCosts(t.Context(), &result, 1); err != nil {
+			t.Fatal(err)
+		}
+		if result.Items[0].Result.Cost != nil ||
+			result.Items[0].Result.CostErr == nil ||
+			result.Cost.UnavailableItems != 1 {
+			t.Fatalf("cost=%v result=%+v", cost, result)
+		}
+	}
+}
+
+func TestLoadBatchCostsHonorsConcurrency(t *testing.T) {
+	t.Parallel()
+	var active atomic.Int64
+	var maximum atomic.Int64
+	load := func(context.Context) (float64, error) {
+		current := active.Add(1)
+		for {
+			previous := maximum.Load()
+			if current <= previous || maximum.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		active.Add(-1)
+		return 1, nil
+	}
+	result := BatchResult{Items: []ItemResult{
+		successfulCostItem(load),
+		successfulCostItem(load),
+		successfulCostItem(load),
+		successfulCostItem(load),
+	}}
+	if err := loadBatchCosts(t.Context(), &result, 2); err != nil {
+		t.Fatal(err)
+	}
+	if maximum.Load() != 2 {
+		t.Fatalf("maximum concurrency=%d", maximum.Load())
+	}
+}
+
+func TestLoadBatchCostsSkipsCanceledContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var calls int
+	result := BatchResult{Items: []ItemResult{
+		successfulCostItem(func(context.Context) (float64, error) {
+			calls++
+			return 1, nil
+		}),
+	}}
+	err := loadBatchCosts(ctx, &result, 1)
+	if !errors.Is(err, context.Canceled) ||
+		calls != 0 ||
+		!errors.Is(result.Items[0].Result.CostErr, context.Canceled) {
+		t.Fatalf("error=%v calls=%d item=%+v", err, calls, result.Items[0])
+	}
+}
+
+func TestLoadBatchCostsRetainsResultsBeforeCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	result := BatchResult{Items: []ItemResult{
+		successfulCostItem(func(context.Context) (float64, error) {
+			cancel()
+			return 0.25, nil
+		}),
+		successfulCostItem(func(context.Context) (float64, error) { return 0.5, nil }),
+		successfulCostItem(func(context.Context) (float64, error) { return 0.75, nil }),
+	}}
+	err := loadBatchCosts(ctx, &result, 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v", err)
+	}
+	if result.Items[0].Result.Cost == nil ||
+		*result.Items[0].Result.Cost != 0.25 ||
+		!errors.Is(result.Items[1].Result.CostErr, context.Canceled) ||
+		!errors.Is(result.Items[2].Result.CostErr, context.Canceled) {
+		t.Fatalf("items=%+v", result.Items)
+	}
+	if result.Cost.KnownTotal != 0.25 ||
+		result.Cost.KnownItems != 1 ||
+		result.Cost.UnavailableItems != 2 {
+		t.Fatalf("summary=%+v", result.Cost)
+	}
+}
+
+func successfulCostItem(load CostLoader) ItemResult {
+	return ItemResult{Result: GenerateResult{Filename: "audio.mp3", cost: load}}
 }
 
 func TestFinalAudioValidationAndClosure(t *testing.T) {
@@ -568,6 +784,47 @@ func (t appendTransformer) Transform(_ context.Context, input Voice) (Voice, err
 	}, nil
 }
 
+type retryingTransformer struct {
+	inputs []string
+}
+
+func (t *retryingTransformer) Transform(_ context.Context, input Voice) (Voice, error) {
+	data, err := io.ReadAll(input)
+	if err != nil {
+		_ = input.Close()
+		return nil, err
+	}
+	t.inputs = append(t.inputs, string(data))
+	if len(t.inputs) == 1 {
+		_ = input.Close()
+		return nil, errors.New("temporary transform failure")
+	}
+	return &fakeVoice{
+		ReadCloser: io.NopCloser(bytes.NewReader(data)),
+		format:     "mp3",
+		source:     input,
+	}, nil
+}
+
+type costAddingTransformer struct{ cost float64 }
+
+func (t costAddingTransformer) Transform(_ context.Context, input Voice) (Voice, error) {
+	data, err := io.ReadAll(input)
+	if err != nil {
+		_ = input.Close()
+		return nil, err
+	}
+	return &fakeVoice{
+		ReadCloser: io.NopCloser(bytes.NewReader(data)),
+		format:     "mp3",
+		source:     input,
+		loadCost: CombineCostLoaders(
+			input.CostLoader(),
+			func(context.Context) (float64, error) { return t.cost, nil },
+		),
+	}, nil
+}
+
 func (f *fakeTransformer) Transform(ctx context.Context, input Voice) (Voice, error) {
 	ReportProgress(ctx, f.description)
 	_, _ = io.ReadAll(input)
@@ -598,6 +855,7 @@ type fakeVoice struct {
 	io.ReadCloser
 	costErr    error
 	source     Voice
+	loadCost   CostLoader
 	format     string
 	cost       float64
 	closeCalls int
@@ -605,11 +863,18 @@ type fakeVoice struct {
 
 func (v *fakeVoice) Format() string    { return v.format }
 func (v *fakeVoice) MediaType() string { return "audio/" + v.format }
-func (v *fakeVoice) LoadCost(ctx context.Context) (float64, error) {
-	if v.source != nil {
-		return v.source.LoadCost(ctx)
+func (v *fakeVoice) CostLoader() CostLoader {
+	if v.loadCost != nil {
+		return v.loadCost
 	}
-	return v.cost, v.costErr
+	if v.source != nil {
+		return v.source.CostLoader()
+	}
+	cost := v.cost
+	costErr := v.costErr
+	return func(context.Context) (float64, error) {
+		return cost, costErr
+	}
 }
 
 func (v *fakeVoice) Close() error {

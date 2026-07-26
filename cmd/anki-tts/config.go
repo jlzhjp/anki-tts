@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -19,28 +20,37 @@ const configFileName = "config.toml"
 type config struct {
 	OpenRouter *openRouterConfig `toml:"openrouter"`
 	FFmpeg     *ffmpegConfig     `toml:"ffmpeg"`
-	Anki       stageConfig       `toml:"anki"`
+	Anki       stageOverrides    `toml:"anki"`
 }
 
-type stageConfig struct {
-	Concurrency int                  `toml:"concurrency"`
-	Retry       pipeline.RetryConfig `toml:"retry"`
+// stageOverrides contains optional configuration-file values. Zero values mean
+// that the corresponding runtime default remains unchanged.
+type stageOverrides struct {
+	Concurrency int            `toml:"concurrency"`
+	Retry       retryOverrides `toml:"retry"`
+}
+
+// retryOverrides is the TOML representation of pipeline.RetryConfig.
+type retryOverrides struct {
+	MaxAttempts    int           `toml:"max_attempts"`
+	InitialBackoff time.Duration `toml:"initial_backoff"`
+	MaxBackoff     time.Duration `toml:"max_backoff"`
 }
 
 type openRouterConfig struct {
-	Model          string               `toml:"model"`
-	APIKey         string               `toml:"api_key"`
-	Voice          string               `toml:"voice"`
-	ResponseFormat string               `toml:"response_format"`
-	Concurrency    int                  `toml:"concurrency"`
-	Retry          pipeline.RetryConfig `toml:"retry"`
+	Model          string         `toml:"model"`
+	APIKey         string         `toml:"api_key"`
+	Voice          string         `toml:"voice"`
+	ResponseFormat string         `toml:"response_format"`
+	Concurrency    int            `toml:"concurrency"`
+	Retry          retryOverrides `toml:"retry"`
 }
 
 type ffmpegConfig struct {
-	Format      ffmpeg.Format        `toml:"format"`
-	Args        []string             `toml:"args"`
-	Concurrency int                  `toml:"concurrency"`
-	Retry       pipeline.RetryConfig `toml:"retry"`
+	Format      ffmpeg.Format  `toml:"format"`
+	Args        []string       `toml:"args"`
+	Concurrency int            `toml:"concurrency"`
+	Retry       retryOverrides `toml:"retry"`
 }
 
 func buildApplication() (*ankitts.Application, error) {
@@ -102,33 +112,33 @@ func buildAudioProcessors(cfg config) ([]ankitts.AudioProcessor, error) {
 
 func pipelineConfig(cfg config) pipeline.Config {
 	configured := pipeline.Config{
-		"anki": mergeStageConfig(pipeline.DefaultStageConfig(4), cfg.Anki),
+		"anki": cfg.Anki.apply(pipeline.DefaultStageConfig(4)),
 	}
 	if cfg.OpenRouter != nil {
-		configured["openrouter"] = mergeStageConfig(pipeline.DefaultStageConfig(4), stageConfig{
+		configured["openrouter"] = (stageOverrides{
 			Concurrency: cfg.OpenRouter.Concurrency, Retry: cfg.OpenRouter.Retry,
-		})
+		}).apply(pipeline.DefaultStageConfig(4))
 	}
 	if cfg.FFmpeg != nil {
-		configured["ffmpeg"] = mergeStageConfig(pipeline.DefaultStageConfig(2), stageConfig{
+		configured["ffmpeg"] = (stageOverrides{
 			Concurrency: cfg.FFmpeg.Concurrency, Retry: cfg.FFmpeg.Retry,
-		})
+		}).apply(pipeline.DefaultStageConfig(2))
 	}
 	return configured
 }
 
-func mergeStageConfig(defaults pipeline.StageConfig, configured stageConfig) pipeline.StageConfig {
-	if configured.Concurrency != 0 {
-		defaults.Concurrency = configured.Concurrency
+func (overrides stageOverrides) apply(config pipeline.StageConfig) pipeline.StageConfig {
+	if overrides.Concurrency != 0 {
+		config.Concurrency = overrides.Concurrency
 	}
-	if configured.Retry.MaxAttempts != 0 {
-		defaults.Retry.MaxAttempts = configured.Retry.MaxAttempts
+	if overrides.Retry.MaxAttempts != 0 {
+		config.Retry.MaxAttempts = overrides.Retry.MaxAttempts
 	}
-	if configured.Retry.InitialBackoff != 0 {
-		defaults.Retry.InitialBackoff = configured.Retry.InitialBackoff
+	if overrides.Retry.InitialBackoff != 0 {
+		config.Retry.InitialBackoff = overrides.Retry.InitialBackoff
 	}
-	if configured.Retry.MaxBackoff != 0 {
-		defaults.Retry.MaxBackoff = configured.Retry.MaxBackoff
+	if overrides.Retry.MaxBackoff != 0 {
+		config.Retry.MaxBackoff = overrides.Retry.MaxBackoff
 	}
-	return defaults
+	return config
 }

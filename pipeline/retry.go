@@ -18,9 +18,9 @@ const (
 
 // RetryConfig controls context-aware exponential retry backoff.
 type RetryConfig struct {
-	MaxAttempts    int           `toml:"max_attempts"`
-	InitialBackoff time.Duration `toml:"initial_backoff"`
-	MaxBackoff     time.Duration `toml:"max_backoff"`
+	MaxAttempts    int
+	InitialBackoff time.Duration
+	MaxBackoff     time.Duration
 }
 
 // RetryPredicate reports whether an operation error should be retried while

@@ -135,8 +135,8 @@ func (v *transformedVoice) Close() error               { return v.stream.Close()
 func (v *transformedVoice) Format() string             { return v.format }
 func (v *transformedVoice) MediaType() string          { return v.mediaType }
 
-func (v *transformedVoice) LoadCost(ctx context.Context) (float64, error) {
-	return v.source.LoadCost(ctx)
+func (v *transformedVoice) CostLoader() ankitts.CostLoader {
+	return v.source.CostLoader()
 }
 
 type outputStream struct {

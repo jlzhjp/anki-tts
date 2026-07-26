@@ -268,6 +268,9 @@ func (s *generationScreen) summaryView() string {
 		succeeded,
 		len(failures),
 	)
+	if cost := formatCostSummary(s.result.Cost); cost != "" {
+		fmt.Fprintln(&builder, cost)
+	}
 	for _, item := range failures {
 		fmt.Fprintf(
 			&builder,
@@ -281,4 +284,40 @@ func (s *generationScreen) summaryView() string {
 		fmt.Fprintf(&builder, "\n%s\n", red(s.executionErr.Error()))
 	}
 	return builder.String()
+}
+
+func formatCostSummary(summary ankitts.CostSummary) string {
+	switch {
+	case summary.KnownItems == 0 && summary.UnavailableItems == 0:
+		return ""
+	case summary.UnavailableItems == 0:
+		return fmt.Sprintf("Cost: $%.6f", summary.KnownTotal)
+	case summary.KnownItems == 0:
+		return fmt.Sprintf(
+			"Cost unavailable for %d %s",
+			summary.UnavailableItems,
+			itemLabel(summary.UnavailableItems),
+		)
+	default:
+		return fmt.Sprintf(
+			"Known cost: $%.6f · %d %s unavailable",
+			summary.KnownTotal,
+			summary.UnavailableItems,
+			costLabel(summary.UnavailableItems),
+		)
+	}
+}
+
+func itemLabel(count int) string {
+	if count == 1 {
+		return "item"
+	}
+	return "items"
+}
+
+func costLabel(count int) string {
+	if count == 1 {
+		return "cost"
+	}
+	return "costs"
 }

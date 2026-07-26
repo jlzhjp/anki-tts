@@ -103,6 +103,42 @@ func TestBatchGenerationShowsRetryAndSummary(t *testing.T) {
 	}
 }
 
+func TestFormatCostSummary(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		want    string
+		summary ankitts.CostSummary
+	}{
+		{name: "empty"},
+		{
+			name:    "known",
+			summary: ankitts.CostSummary{KnownTotal: 0.25, KnownItems: 2},
+			want:    "Cost: $0.250000",
+		},
+		{
+			name: "partial",
+			summary: ankitts.CostSummary{
+				KnownTotal: 0.25, KnownItems: 1, UnavailableItems: 2,
+			},
+			want: "Known cost: $0.250000 · 2 costs unavailable",
+		},
+		{
+			name:    "unavailable",
+			summary: ankitts.CostSummary{UnavailableItems: 1},
+			want:    "Cost unavailable for 1 item",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := formatCostSummary(test.summary); got != test.want {
+				t.Fatalf("summary=%q want=%q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestBatchConfirmationAcceptsAndRejects(t *testing.T) {
 	t.Parallel()
 	screen := &confirmationScreen{}

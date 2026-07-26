@@ -2,8 +2,33 @@ package ankitts
 
 import (
 	"context"
+	"errors"
 	"io"
 )
+
+// ErrCostUnavailable indicates that a voice has no cost information.
+var ErrCostUnavailable = errors.New("voice cost is unavailable")
+
+// CostLoader loads the cost associated with generated or transformed audio.
+type CostLoader func(context.Context) (float64, error)
+
+// CombineCostLoaders returns a loader that sums its inputs in order.
+func CombineCostLoaders(loaders ...CostLoader) CostLoader {
+	return func(ctx context.Context) (float64, error) {
+		var total float64
+		for _, load := range loaders {
+			if load == nil {
+				return 0, ErrCostUnavailable
+			}
+			cost, err := load(ctx)
+			if err != nil {
+				return 0, err
+			}
+			total += cost
+		}
+		return total, nil
+	}
+}
 
 // Service generates speech from text. Implementations must support concurrent
 // Generate calls from the selected service pipeline stage.
@@ -25,12 +50,12 @@ type Input struct {
 }
 
 // Voice is a generated audio stream with provider metadata. Callers must close
-// it. LoadCost may perform network I/O and remains valid after Close.
+// it. CostLoader returns a function that remains valid after Close.
 type Voice interface {
 	io.ReadCloser
 	Format() string
 	MediaType() string
-	LoadCost(ctx context.Context) (float64, error)
+	CostLoader() CostLoader
 }
 
 // AudioProcessor associates a pipeline stage name with a Transformer.

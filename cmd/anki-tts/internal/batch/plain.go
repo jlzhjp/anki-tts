@@ -104,6 +104,11 @@ func reportBatchResult(
 	if _, err := fmt.Fprintf(output, "\nSummary: %d succeeded, %d failed.\n", succeeded, len(failures)); err != nil {
 		return fmt.Errorf("write batch summary: %w", err)
 	}
+	if cost := formatCostSummary(result.Cost); cost != "" {
+		if _, err := fmt.Fprintln(output, cost); err != nil {
+			return fmt.Errorf("write batch cost summary: %w", err)
+		}
+	}
 	ordered := slices.Clone(result.Items)
 	slices.SortFunc(ordered, func(a, b ankitts.ItemResult) int {
 		return cmp.Compare(a.NoteID, b.NoteID)

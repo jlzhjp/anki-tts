@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"jlzhjp.dev/ankitts"
 )
 
 func TestTransformStreamsAudio(t *testing.T) {
@@ -57,7 +59,7 @@ func TestTransformStreamsAudio(t *testing.T) {
 	if !input.closed {
 		t.Fatal("input stream was not closed")
 	}
-	cost, err := voice.LoadCost(t.Context())
+	cost, err := voice.CostLoader()(t.Context())
 	if err != nil || cost != 0.0025 {
 		t.Fatalf("delegated cost = %v, error = %v", cost, err)
 	}
@@ -333,8 +335,10 @@ type testVoice struct {
 
 func (v *testVoice) Format() string    { return v.format }
 func (v *testVoice) MediaType() string { return v.mediaType }
-func (v *testVoice) LoadCost(context.Context) (float64, error) {
-	return v.cost, nil
+func (v *testVoice) CostLoader() ankitts.CostLoader {
+	return func(context.Context) (float64, error) {
+		return v.cost, nil
+	}
 }
 
 func (r *trackedReadCloser) Close() error {

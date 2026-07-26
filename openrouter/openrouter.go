@@ -249,8 +249,13 @@ func (v *voiceResult) Read(p []byte) (int, error) {
 func (v *voiceResult) Close() error      { return v.body.Close() }
 func (v *voiceResult) Format() string    { return v.format }
 func (v *voiceResult) MediaType() string { return v.mediaType }
-func (v *voiceResult) LoadCost(ctx context.Context) (float64, error) {
-	return v.costCalculator.Calculate(ctx, v.sentence, v.model)
+func (v *voiceResult) CostLoader() ankitts.CostLoader {
+	calculator := v.costCalculator
+	sentence := v.sentence
+	model := v.model
+	return func(ctx context.Context) (float64, error) {
+		return calculator.Calculate(ctx, sentence, model)
+	}
 }
 
 // openRouterError converts an unsuccessful speech response into a descriptive error.

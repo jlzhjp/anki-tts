@@ -182,6 +182,8 @@ func (batchTTS) Generate(context.Context, ankitts.Input) (ankitts.Voice, error) 
 
 type batchVoice struct{ io.ReadCloser }
 
-func (*batchVoice) Format() string                            { return "mp3" }
-func (*batchVoice) MediaType() string                         { return "audio/mpeg" }
-func (*batchVoice) LoadCost(context.Context) (float64, error) { return 0, nil }
+func (*batchVoice) Format() string    { return "mp3" }
+func (*batchVoice) MediaType() string { return "audio/mpeg" }
+func (*batchVoice) CostLoader() ankitts.CostLoader {
+	return func(context.Context) (float64, error) { return 0, nil }
+}
